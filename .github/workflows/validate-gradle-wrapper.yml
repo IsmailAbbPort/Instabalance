@@ -1,0 +1,18 @@
+# Verifies that gradle/wrapper/gradle-wrapper.jar is a checksum match for an
+# official Gradle release. The wrapper jar is executable code committed to the
+# repo, so a tampered one would run on every build and every CI job.
+name: Validate Gradle wrapper
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: gradle/actions/wrapper-validation@v6
