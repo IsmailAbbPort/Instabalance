@@ -1,0 +1,120 @@
+package com.instabalance
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class CategoriesTest {
+
+    private fun entry(id: String, type: EntryType, categoryId: String?, fromRule: Boolean = false) =
+        Entry(id = id, type = type, amountMinor = 100, timestamp = 1, categoryId = categoryId,
+            categoryFromRule = fromRule)
+
+    @Test fun presetIdsAreUnique() {
+        val ids = Categories.PRESETS.map { it.id }
+        assertEquals(ids.size, ids.toSet().size)
+    }
+
+    @Test fun presetColourIndicesAreInsideTheRamp() {
+        // A stored index out of range would blow up at draw time, not here, so pin it here.
+        Categories.PRESETS.forEach {
+            assertTrue("${it.id} has colorIndex ${it.colorIndex}",
+                it.colorIndex in ChartPalette.RAMP.indices)
+        }
+    }
+
+    @Test fun feeAndOtherPresetsExist() {
+        // Code references these by constant, so their absence is a crash waiting to happen.
+        listOf(Categories.FEES, Categories.CASH, Categories.REFUND,
+            Categories.OTHER_EXPENSE, Categories.OTHER_INCOME).forEach {
+            assertTrue(it, Categories.PRESETS.any { p -> p.id == it })
+        }
+    }
+
+    @Test fun visibleForFiltersByDirection() {
+        val expense = Categories.visibleFor(Categories.PRESETS, EntryType.DEBIT).map { it.id }
+        val income = Categories.visibleFor(Categories.PRESETS, EntryType.CREDIT).map { it.id }
+        assertTrue(expense.contains("groceries"))
+        assertTrue(!expense.contains("salary"))
+        assertTrue(income.contains("salary"))
+        assertTrue(!income.contains("groceries"))
+    }
+
+    @Test fun bothKindAppearsInEitherDirection() {
+        assertTrue(Categories.visibleFor(Categories.PRESETS, EntryType.DEBIT).any { it.id == "family" })
+        assertTrue(Categories.visibleFor(Categories.PRESETS, EntryType.CREDIT).any { it.id == "family" })
+    }
+
+    @Test fun anchorIsOfferedNothing() {
+        // An anchor is a re-sync, not spending, so it must never be categorisable.
+        assertTrue(Categories.visibleFor(Categories.PRESETS, EntryType.ANCHOR).isEmpty())
+    }
+
+    @Test fun hiddenCategoriesDisappearFromPickers() {
+        val hidden = Categories.setHidden(Categories.PRESETS, "groceries", true)
+        assertTrue(Categories.visibleFor(hidden, EntryType.DEBIT).none { it.id == "groceries" })
+        // But the category itself still exists, so entries filed under it keep their name.
+        assertEquals("Groceries", Categories.byId(hidden, "groceries")?.name)
+    }
+
+    @Test fun renameKeepsTheId() {
+        val renamed = Categories.rename(Categories.PRESETS, "groceries", "Supermarket")
+        assertEquals("Supermarket", Categories.byId(renamed, "groceries")?.name)
+    }
+
+    @Test fun recolourClampsIntoTheRamp() {
+        val out = Categories.recolour(Categories.PRESETS, "groceries", 999)
+        assertEquals(ChartPalette.RAMP.lastIndex, Categories.byId(out, "groceries")?.colorIndex)
+    }
+
+    @Test fun ensurePresetsAppendsOnlyWhatIsMissing() {
+        val trimmed = Categories.PRESETS.filterNot { it.id == "rent" }
+        val restored = Categories.ensurePresets(trimmed)
+        assertEquals(Categories.PRESETS.size, restored.size)
+        assertTrue(restored.any { it.id == "rent" })
+    }
+
+    @Test fun ensurePresetsLeavesRenamedPresetsAlone() {
+        // An upgrade must not undo the user's rename.
+        val renamed = Categories.rename(Categories.PRESETS, "rent", "Flat")
+        assertEquals("Flat", Categories.byId(Categories.ensurePresets(renamed), "rent")?.name)
+    }
+
+    @Test fun byIdReturnsNullForUnknownAndForNull() {
+        // A dangling id from a hand-edited file resolves, it does not throw.
+        assertNull(Categories.byId(Categories.PRESETS, "nope"))
+        assertNull(Categories.byId(Categories.PRESETS, null))
+    }
+
+    @Test fun deleteRefusesPresets() {
+        val data = LedgerData()
+        assertEquals(data, Categories.delete(data, "groceries"))
+    }
+
+    @Test fun deleteRemovesCustomAndSendsItsEntriesBackToTheInbox() {
+        val withCustom = Categories.add(Categories.PRESETS, "Gym", CategoryKind.EXPENSE, 2)
+        val id = withCustom.last().id
+        val data = LedgerData(
+            entries = listOf(entry("a", EntryType.DEBIT, id, fromRule = true),
+                entry("b", EntryType.DEBIT, "groceries")),
+            categories = withCustom,
+            merchantRules = listOf(MerchantRule(pattern = "GYM", categoryId = id, createdAt = 1)),
+        )
+
+        val after = Categories.delete(data, id)
+
+        assertNull(Categories.byId(after.categories, id))
+        assertNull(after.entries.first { it.id == "a" }.categoryId)
+        // The rule flag has to clear too, or the entry claims a rule filed it when none exists.
+        assertEquals(false, after.entries.first { it.id == "a" }.categoryFromRule)
+        assertEquals("groceries", after.entries.first { it.id == "b" }.categoryId)
+        assertTrue(after.merchantRules.isEmpty())
+    }
+
+    @Test fun entryCountIsWhatTheConfirmDialogShows() {
+        val entries = listOf(entry("a", EntryType.DEBIT, "rent"), entry("b", EntryType.DEBIT, "rent"),
+            entry("c", EntryType.DEBIT, null))
+        assertEquals(2, Categories.entryCount(entries, "rent"))
+    }
+}

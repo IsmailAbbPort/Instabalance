@@ -85,4 +85,61 @@ class BalanceParserTest {
         assertNull(parse(""))
         assertNull(parse("Your OTP code is 12345"))
     }
+
+    // ---- Merchant extraction ----
+    // Only some messages name a counterparty. The ones that do are what the category rules learn
+    // from; the ones that don't are why the review inbox exists at all.
+
+    @Test fun arabicPurchase_extractsTheShop() {
+        assertEquals(
+            "PAYMOB RAF SPECIALIT CAIRO N 07",
+            parse("تم الشراء بمبلغ 165جم على الكارت رقم  +++0954 من PAYMOB RAF SPECIALIT  CAIRO N 07")?.merchant
+        )
+    }
+
+    @Test fun arabicCancelledPurchase_extractsTheShop() {
+        assertEquals(
+            "New Rabia for Trading Masr Elgedida",
+            parse("تم الغاء الشراء بمبلغ 23.8جم على الكارت رقم  +++0954 من New Rabia for Trading Masr Elgedida")?.merchant
+        )
+    }
+
+    @Test fun arabicWithdrawal_merchantIsAtm() {
+        // One rule on "ATM" then files every cash withdrawal, which is why this is worth reading.
+        assertEquals(
+            "ATM",
+            parse("تم سحب  100جم من حساب 0057*100 من ATM  الرصيد المتاح  2091.36جم")?.merchant
+        )
+    }
+
+    @Test fun englishCredited_extractsTheSender() {
+        assertEquals(
+            "NANICE AHMED",
+            parse("Your account was credited by EGP 100 on 22-07 22:51 IPN REF# 70794154067 from NANICE AHMED for details please call 19342")?.merchant
+        )
+    }
+
+    @Test fun instapayNotification_extractsTheAddress() {
+        assertEquals(
+            "naniiceeabbas@instapay",
+            parse("InstaPay 22/07/2026 You have received 100.00 EGP from naniiceeabbas@instapay")?.merchant
+        )
+    }
+
+    @Test fun englishSent_extractsTheRecipientAddress() {
+        assertEquals("someone@instapay", parse("You have sent 50 EGP to someone@instapay")?.merchant)
+    }
+
+    @Test fun englishCharged_hasNoMerchant() {
+        // The structural limit of the whole feature: an InstaPay send seen only as an EGBANK SMS
+        // names nobody, so there is nothing to learn and it must land in the inbox.
+        val r = parse("Your account was charged by EGP 1105 on 21-07 14:04 IPN REF# 19825518418 for details please call 19342")
+        assertNotNull(r)
+        assertNull(r!!.merchant)
+    }
+
+    @Test fun aMissingMerchantNeverCostsUsTheTransaction() {
+        // The amount and the direction are the money; the merchant is a convenience.
+        assertTxn("تم الشراء بمبلغ ١٦٥جم على الكارت", EntryType.DEBIT, 16500)
+    }
 }
