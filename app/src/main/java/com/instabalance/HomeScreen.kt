@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -73,16 +74,35 @@ internal fun HomeScreen(onSettings: () -> Unit, onInbox: () -> Unit) {
                 Modifier.offset(y = (-12).dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Button(onClick = { dialog = Dialog.CREDIT }, modifier = Modifier.weight(1f)) {
+                // Orange, not violet: in InstaPay the violet is identity (header, active nav) and
+                // orange is every interactive affordance. Purple buttons read as the wrong app.
+                Button(
+                    onClick = { dialog = Dialog.CREDIT },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary,
+                        contentColor = MaterialTheme.colorScheme.onSecondary,
+                    ),
+                ) {
                     Icon(Icons.Default.Add, null); Spacer(Modifier.width(4.dp)); Text("Received")
                 }
-                Button(onClick = { dialog = Dialog.DEBIT }, modifier = Modifier.weight(1f)) {
+                Button(
+                    onClick = { dialog = Dialog.DEBIT },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary,
+                        contentColor = MaterialTheme.colorScheme.onSecondary,
+                    ),
+                ) {
                     Icon(Icons.Default.Remove, null); Spacer(Modifier.width(4.dp)); Text("Sent")
                 }
             }
             OutlinedButton(
                 onClick = { dialog = Dialog.ANCHOR },
-                modifier = Modifier.fillMaxWidth().offset(y = (-12).dp)
+                modifier = Modifier.fillMaxWidth().offset(y = (-12).dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.secondary,
+                ),
             ) {
                 Text("Set balance (re-sync from the real app)")
             }

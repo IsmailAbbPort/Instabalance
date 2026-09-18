@@ -30,8 +30,17 @@ class ChartPaletteTest {
         }
     }
 
-    @Test fun uncategorisedGreyIsAlsoVisible() {
+    @Test fun bothNeutralsAreAlsoVisible() {
         assertTrue(contrastOnWhite(ChartPalette.UNCATEGORISED) >= 3.0)
+        assertTrue(contrastOnWhite(ChartPalette.OTHER_ROLLUP) >= 3.0)
+    }
+
+    @Test fun theTwoNeutralsAreTellableApart() {
+        // They can appear in the same ring, and "not sorted yet" and "small categories combined"
+        // mean different things, so they must not render as the same grey.
+        val a = luminance(ChartPalette.UNCATEGORISED)
+        val b = luminance(ChartPalette.OTHER_ROLLUP)
+        assertTrue("neutrals are too close: $a vs $b", maxOf(a, b) / minOf(a, b) >= 1.5)
     }
 
     @Test fun uncategorisedIsNotInTheRamp() {

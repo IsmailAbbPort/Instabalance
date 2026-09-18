@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -88,6 +89,7 @@ internal fun SettingsScreen(
             NavRow("Categories", "${data.categories.count { !it.hidden }} in use", onCategories)
             NavRow("Merchant rules", "${data.merchantRules.size} saved", onRules)
             SettingsPanel(data)
+            if (BuildConfig.DEBUG) DeveloperTools()
         }
     }
 }
@@ -334,6 +336,74 @@ private fun SettingsPanel(data: LedgerData) {
 
     if (showPasscodeSetup) {
         PasscodeSetupDialog(onDismiss = { showPasscodeSetup = false })
+    }
+}
+
+/**
+ * Debug builds only, and compiled out of release entirely by the BuildConfig.DEBUG check at the
+ * call site. Exists so the charts, the review inbox and the budget can be seen on a machine that
+ * has no real messages, without waiting weeks for them.
+ */
+@Composable
+private fun DeveloperTools() {
+    var confirmLoad by remember { mutableStateOf(false) }
+    var confirmClear by remember { mutableStateOf(false) }
+
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Developer tools", style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold)
+            Text(
+                "Debug builds only. Not present in a release build.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = { confirmLoad = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("Load sample data")
+            }
+            OutlinedButton(onClick = { confirmClear = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("Clear all transactions")
+            }
+        }
+    }
+
+    if (confirmLoad) {
+        AlertDialog(
+            onDismissRequest = { confirmLoad = false },
+            title = { Text("Replace everything with sample data?") },
+            text = {
+                Text(
+                    "Four months of generated transactions, a few merchant rules and a monthly " +
+                        "budget. Your existing transactions are deleted. Your passcode is kept."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    LedgerRepository.loadSampleData()
+                    confirmLoad = false
+                }) { Text("Load") }
+            },
+            dismissButton = { TextButton(onClick = { confirmLoad = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("Delete every transaction?") },
+            text = { Text("Categories, rules and your passcode are kept. This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    LedgerRepository.clearAllEntries()
+                    confirmClear = false
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
+        )
     }
 }
 

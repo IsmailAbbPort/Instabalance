@@ -58,9 +58,26 @@ class CategoriesTest {
         assertEquals("Groceries", Categories.byId(hidden, "groceries")?.name)
     }
 
-    @Test fun renameKeepsTheId() {
-        val renamed = Categories.rename(Categories.PRESETS, "groceries", "Supermarket")
-        assertEquals("Supermarket", Categories.byId(renamed, "groceries")?.name)
+    @Test fun renamingYourOwnCategoryKeepsTheId() {
+        // The id is what every entry points at, so a rename must never orphan anything.
+        val withCustom = Categories.add(Categories.PRESETS, "Gym", CategoryKind.EXPENSE, 2)
+        val id = withCustom.last().id
+
+        val renamed = Categories.rename(withCustom, id, "Fitness")
+
+        assertEquals("Fitness", Categories.byId(renamed, id)?.name)
+    }
+
+    @Test fun presetsCannotBeRenamed() {
+        // Code files things under "fees" and "cash" by id and describes them by name, so a
+        // built-in whose name no longer matches what the app puts in it would be a lie.
+        val out = Categories.rename(Categories.PRESETS, "groceries", "Supermarket")
+        assertEquals("Groceries", Categories.byId(out, "groceries")?.name)
+    }
+
+    @Test fun presetsCanStillBeRecoloured() {
+        val out = Categories.recolour(Categories.PRESETS, "groceries", 4)
+        assertEquals(4, Categories.byId(out, "groceries")?.colorIndex)
     }
 
     @Test fun recolourClampsIntoTheRamp() {
@@ -75,10 +92,10 @@ class CategoriesTest {
         assertTrue(restored.any { it.id == "rent" })
     }
 
-    @Test fun ensurePresetsLeavesRenamedPresetsAlone() {
-        // An upgrade must not undo the user's rename.
-        val renamed = Categories.rename(Categories.PRESETS, "rent", "Flat")
-        assertEquals("Flat", Categories.byId(Categories.ensurePresets(renamed), "rent")?.name)
+    @Test fun ensurePresetsLeavesRecolouredPresetsAlone() {
+        // An upgrade must not undo the user's colour choice.
+        val recoloured = Categories.recolour(Categories.PRESETS, "rent", 6)
+        assertEquals(6, Categories.byId(Categories.ensurePresets(recoloured), "rent")?.colorIndex)
     }
 
     @Test fun byIdReturnsNullForUnknownAndForNull() {

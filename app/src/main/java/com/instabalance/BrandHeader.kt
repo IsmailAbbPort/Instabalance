@@ -60,20 +60,28 @@ internal fun BrandHeader(
                 )
             )
 
-            // The blob: a rounded wedge anchored off the left edge, angled down to the right, so it
-            // reads as one continuous shape running off-screen rather than a decoration floating
-            // on top. Proportional to the header so it holds its shape at any width.
+            // The blob: a wedge anchored off the left edge whose bottom edge sweeps down to the
+            // right, so it reads as one continuous shape running off-screen rather than a
+            // decoration floating on top. The greeting and the app name sit ON it, which is what
+            // makes the pairing recognisable; it therefore has to reach past the second line of
+            // text. Proportional to the header so it holds its shape at any width.
             val w = size.width
             val h = size.height
             val blob = Path().apply {
                 moveTo(-w * 0.10f, 0f)
-                lineTo(w * 0.42f, 0f)
+                lineTo(w * 0.30f, 0f)
+                // Bulges right, then sweeps back left as it descends, giving the leaf shape rather
+                // than the semicircle a single arc produces.
                 cubicTo(
-                    w * 0.56f, h * 0.10f,
-                    w * 0.56f, h * 0.42f,
-                    w * 0.40f, h * 0.52f,
+                    w * 0.62f, h * 0.06f,
+                    w * 0.68f, h * 0.48f,
+                    w * 0.34f, h * 0.76f,
                 )
-                lineTo(-w * 0.10f, h * 0.52f)
+                cubicTo(
+                    w * 0.22f, h * 0.86f,
+                    w * 0.06f, h * 0.90f,
+                    -w * 0.10f, h * 0.90f,
+                )
                 close()
             }
             drawPath(

@@ -100,6 +100,24 @@ class InsightsTest {
         assertEquals(slices, Insights.topN(slices, 7))
     }
 
+    @Test fun topNNeverRollsUpTheUncategorisedSlice() {
+        // It sorts last, so a naive take(n) folds it into "Other categories" and the ring stops
+        // admitting what it does not know. Seen happening on a real screen before this test existed.
+        val slices = (1..10).map { Slice("c$it", (11 - it) * 1000L) } + Slice(null, 500L)
+
+        val out = Insights.topN(slices, 3)
+
+        assertEquals(Slice(null, 500L), out.last())
+        assertTrue(out.any { it.categoryId == Insights.OTHER_ROLLUP })
+        // And it must not be counted twice, once on its own and once inside the roll-up.
+        assertEquals(slices.sumOf { it.amountMinor }, out.sumOf { it.amountMinor })
+    }
+
+    @Test fun topNKeepsUncategorisedWhenNothingIsRolledUp() {
+        val slices = listOf(Slice("a", 100), Slice(null, 50))
+        assertEquals(slices, Insights.topN(slices, 7))
+    }
+
     // ---- daily / monthly ----------------------------------------------------
 
     @Test fun dailyKeepsEmptyDays() {

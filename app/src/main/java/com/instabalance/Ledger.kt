@@ -430,6 +430,29 @@ object LedgerRepository {
         return count
     }
 
+    /**
+     * Replaces the ledger with generated sample data. Only ever called from a debug build: it
+     * destroys whatever is there, which is the point on a machine that has nothing worth keeping.
+     */
+    fun loadSampleData(now: Long = System.currentTimeMillis()) = mutate {
+        LedgerData(
+            entries = SampleData.generate(now),
+            merchantRules = SampleData.rules(now),
+            // Deliberately just under 75 percent of a typical month, so the next manual expense
+            // demonstrates the milestone alert.
+            monthlyBudgetMinor = 1_200_000,
+            // Keep whatever lock the user has set up; wiping it mid-session would lock them out.
+            passcodeHash = it.passcodeHash,
+            passcodeSalt = it.passcodeSalt,
+            biometricEnabled = it.biometricEnabled,
+        )
+    }
+
+    /** Debug-only companion to [loadSampleData], for getting back to an empty app. */
+    fun clearAllEntries() = mutate {
+        it.copy(entries = emptyList(), merchantRules = emptyList(), highestMilestoneFired = 0)
+    }
+
     /** One lock, one persist, for the many small settings mutations that all look the same. */
     private inline fun mutate(block: (LedgerData) -> LedgerData) = synchronized(lock) {
         val next = block(_data.value)

@@ -32,6 +32,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // So the sample-data controls can be compiled out of a release build entirely.
+        buildConfig = true
     }
     testOptions {
         unitTests.isReturnDefaultValues = true

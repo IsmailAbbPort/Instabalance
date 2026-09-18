@@ -15,10 +15,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,8 +51,20 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 internal fun CategoriesScreen(onBack: () -> Unit) {
     val data by LedgerRepository.data.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<String?>(null) }
+    var creating by remember { mutableStateOf(false) }
 
     Scaffold(
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = { creating = true },
+                containerColor = MaterialTheme.colorScheme.secondary,
+                contentColor = Color.White,
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text("New category")
+            }
+        },
         topBar = {
             TopAppBar(
                 title = { Text("Categories") },
@@ -100,6 +115,90 @@ internal fun CategoriesScreen(onBack: () -> Unit) {
             )
         }
     }
+
+    if (creating) {
+        NewCategorySheet(
+            takenColours = data.categories.map { it.colorIndex },
+            onDismiss = { creating = false },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun NewCategorySheet(takenColours: List<Int>, onDismiss: () -> Unit) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var name by remember { mutableStateOf("") }
+    var kind by remember { mutableStateOf(CategoryKind.EXPENSE) }
+    // Opens on a colour nothing is using yet, so two categories do not look alike by default.
+    var colour by remember {
+        mutableStateOf(ChartPalette.RAMP.indices.firstOrNull { it !in takenColours } ?: 0)
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+        ) {
+            Text("New category", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(16.dp))
+            Text("Applies to", style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CategoryKind.entries.forEach { k ->
+                    FilterChip(
+                        selected = kind == k,
+                        onClick = { kind = k },
+                        label = {
+                            Text(
+                                when (k) {
+                                    CategoryKind.EXPENSE -> "Expenses"
+                                    CategoryKind.INCOME -> "Income"
+                                    CategoryKind.BOTH -> "Both"
+                                }
+                            )
+                        },
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Text("Colour", style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ChartPalette.RAMP.indices.forEach { i ->
+                    Swatch(
+                        colour = Color(ChartPalette.forIndex(i)),
+                        selected = i == colour,
+                        onClick = { colour = i },
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            Row {
+                TextButton(
+                    enabled = name.isNotBlank(),
+                    onClick = {
+                        LedgerRepository.addCategory(name, kind, colour)
+                        onDismiss()
+                    },
+                ) { Text("Create") }
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
+    }
 }
 
 @Composable
@@ -143,15 +242,20 @@ private fun CategoryEditSheet(category: Category, entryCount: Int, onDismiss: ()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 28.dp),
         ) {
-            Text("Edit category", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text("Name") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+            Text(
+                if (category.preset) category.name else "Edit category",
+                style = MaterialTheme.typography.titleMedium,
             )
+            Spacer(Modifier.height(12.dp))
+            if (!category.preset) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             Spacer(Modifier.height(16.dp))
             Text("Colour", style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -168,9 +272,11 @@ private fun CategoryEditSheet(category: Category, entryCount: Int, onDismiss: ()
             Spacer(Modifier.height(20.dp))
             Row {
                 TextButton(onClick = {
-                    if (name.isNotBlank()) LedgerRepository.renameCategory(category.id, name)
+                    if (!category.preset && name.isNotBlank()) {
+                        LedgerRepository.renameCategory(category.id, name)
+                    }
                     onDismiss()
-                }) { Text("Save") }
+                }) { Text("Done") }
                 Spacer(Modifier.weight(1f))
                 if (!category.preset) {
                     TextButton(onClick = { confirmDelete = true }) {
@@ -180,7 +286,9 @@ private fun CategoryEditSheet(category: Category, entryCount: Int, onDismiss: ()
             }
             if (category.preset) {
                 Text(
-                    "Built-in categories can be renamed, recoloured and hidden, but not deleted.",
+                    "Built-in categories can be recoloured and hidden. Renaming and deleting are " +
+                        "for your own categories, because the app files things like fees and " +
+                        "cash withdrawals here by name.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -73,12 +73,25 @@ object Insights {
             )
     }
 
-    /** Beyond [n], slices become one roll-up, so the ring never grows untappable slivers. */
+    /**
+     * Beyond [n], slices become one roll-up, so the ring never grows untappable slivers.
+     *
+     * The uncategorised slice is never rolled up. It sorts last, so a naive take(n) would fold it
+     * into "Other categories" and the ring would quietly stop admitting how much it does not know,
+     * which is the exact dishonesty having a separate slice exists to prevent.
+     */
     fun topN(slices: List<Slice>, n: Int): List<Slice> {
-        if (slices.size <= n) return slices
-        val head = slices.take(n)
-        val rest = slices.drop(n).sumOf { it.amountMinor }
-        return if (rest > 0) head + Slice(OTHER_ROLLUP, rest) else head
+        val unknown = slices.firstOrNull { it.categoryId == null }
+        val known = slices.filter { it.categoryId != null }
+        if (known.size <= n) return slices
+
+        val head = known.take(n)
+        val rest = known.drop(n).sumOf { it.amountMinor }
+        return buildList {
+            addAll(head)
+            if (rest > 0) add(Slice(OTHER_ROLLUP, rest))
+            unknown?.let { add(it) }
+        }
     }
 
     /** One bucket per day, including the empty ones: a gap in a bar chart has to be visible. */

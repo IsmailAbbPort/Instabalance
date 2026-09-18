@@ -17,6 +17,13 @@ object ChartPalette {
     /** Drawn for entries with no category yet, always last, deliberately colourless. */
     const val UNCATEGORISED = 0xFF6F7378L
 
+    /**
+     * The "Other categories" roll-up. A separate neutral from [UNCATEGORISED] because both can
+     * appear in the same ring, and "spending I have not sorted" and "small categories combined"
+     * mean completely different things.
+     */
+    const val OTHER_ROLLUP = 0xFF3F444AL
+
     val RAMP = listOf(
         0xFF7A12D4L, // violet, the brand identity colour
         0xFFF26722L, // orange

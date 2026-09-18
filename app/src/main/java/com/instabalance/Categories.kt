@@ -76,8 +76,8 @@ object Categories {
 
     /**
      * Appends presets the stored list is missing, so a preset added in a later build reaches
-     * existing users. Presets already present are left exactly as they are, so a rename or a hide
-     * the user made survives every upgrade.
+     * existing users. Presets already present are left exactly as they are, so a recolour or a
+     * hide the user made survives every upgrade.
      */
     fun ensurePresets(categories: List<Category>): List<Category> {
         val known = categories.mapTo(mutableSetOf()) { it.id }
@@ -93,10 +93,18 @@ object Categories {
             colorIndex = colorIndex,
         )
 
+    /**
+     * Only your own categories can be renamed. A built-in keeps its name so that the code that
+     * references one by id ([FEES], [CASH], the two [OTHER_EXPENSE]/[OTHER_INCOME] escape hatches)
+     * keeps describing what it actually does. Returns the list unchanged for a preset.
+     */
     fun rename(categories: List<Category>, id: String, name: String): List<Category> =
-        categories.map { if (it.id == id) it.copy(name = name.trim()) else it }
+        categories.map {
+            if (it.id == id && !it.preset) it.copy(name = name.trim()) else it
+        }
 
-    /** Coerced into the ramp so a bad index can never reach a list access at draw time. */
+    /** Every category can be recoloured, presets included. Coerced into the ramp so a bad index
+     * can never reach a list access at draw time. */
     fun recolour(categories: List<Category>, id: String, colorIndex: Int): List<Category> =
         categories.map {
             if (it.id == id) it.copy(colorIndex = colorIndex.coerceIn(0, ChartPalette.RAMP.lastIndex)) else it

@@ -74,7 +74,7 @@ internal fun InsightsSection(data: LedgerData) {
 
     fun colourOf(slice: Slice): Color = when (slice.categoryId) {
         null -> Color(ChartPalette.UNCATEGORISED)
-        Insights.OTHER_ROLLUP -> Color(ChartPalette.UNCATEGORISED)
+        Insights.OTHER_ROLLUP -> Color(ChartPalette.OTHER_ROLLUP)
         else -> Color(
             ChartPalette.forIndex(
                 Categories.byId(data.categories, slice.categoryId)?.colorIndex ?: 0

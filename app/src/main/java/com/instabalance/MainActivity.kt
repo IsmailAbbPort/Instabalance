@@ -17,11 +17,24 @@ class MainActivity : FragmentActivity() {
         // Mark the window secure: the OS won't snapshot it for the app switcher or the resume
         // animation (which is what briefly flashed the balance before the lock), and it blocks
         // screenshots of your balance too.
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE
-        )
+        //
+        // Off in debug builds only, so the UI can be screenshotted during review. The flag exists
+        // to protect real money on a real phone, and a release build always has it.
+        if (!BuildConfig.DEBUG) {
+            window.setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE
+            )
+        }
         LedgerRepository.init(applicationContext)
+
+        // Debug-only hook so sample data can be loaded without tapping through Settings:
+        //   adb shell am start -n com.instabalance/.MainActivity --ez seed_sample_data true
+        // Handy for screenshots, and for a device whose input service is being unreliable.
+        if (BuildConfig.DEBUG && intent?.getBooleanExtra("seed_sample_data", false) == true) {
+            LedgerRepository.loadSampleData()
+        }
+
         setContent {
             InstaBalanceTheme {
                 Surface(color = MaterialTheme.colorScheme.background) {
