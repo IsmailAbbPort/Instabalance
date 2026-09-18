@@ -8,6 +8,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 enum class EntryType { ANCHOR, CREDIT, DEBIT }
@@ -195,8 +197,12 @@ object LedgerRepository {
         categoryId: String? = null,
     ) {
         require(type != EntryType.ANCHOR)
-        addEntry(Entry(type = type, amountMinor = amountMinor, timestamp = timestamp,
-            source = Source.MANUAL, note = note, categoryId = categoryId))
+        val milestone = synchronized(lock) {
+            addEntryLocked(Entry(type = type, amountMinor = amountMinor, timestamp = timestamp,
+                source = Source.MANUAL, note = note, categoryId = categoryId))
+            evaluateBudgetLocked(timestamp)
+        }
+        postMilestone(milestone)
     }
 
     fun setBalance(amountMinor: Long, note: String, timestamp: Long) {
@@ -216,9 +222,12 @@ object LedgerRepository {
      * within the window, this one is dropped (so a txn seen on BOTH channels counts once).
      * Returns true if it was actually added.
      */
-    fun addAuto(parsed: ParsedTxn, source: Source, rawText: String, timestamp: Long): Boolean =
-        synchronized(lock) {
-            if (isDuplicateAuto(_data.value.entries, parsed.type, parsed.amountMinor, timestamp)) return false
+    fun addAuto(parsed: ParsedTxn, source: Source, rawText: String, timestamp: Long): Boolean {
+        var milestone: Int? = null
+        val added = synchronized(lock) {
+            if (isDuplicateAuto(_data.value.entries, parsed.type, parsed.amountMinor, timestamp)) {
+                return@synchronized false
+            }
             // Rules run here, inside the lock, which is what lets a transaction captured while the
             // app is closed arrive already filed.
             addEntryLocked(
@@ -247,8 +256,14 @@ object LedgerRepository {
                         categoryId = Categories.FEES))
                 }
             }
+            milestone = evaluateBudgetLocked(timestamp)
             true
         }
+        // Outside the lock on purpose: posting a notification must not be able to hold the ledger
+        // lock, and this runs on a binder thread while the app is closed.
+        if (added) postMilestone(milestone)
+        return added
+    }
 
     private fun addEntry(entry: Entry) = synchronized(lock) { addEntryLocked(entry) }
 
@@ -256,6 +271,73 @@ object LedgerRepository {
         val next = _data.value.copy(entries = (_data.value.entries + entry).sortedBy { it.timestamp })
         _data.value = next
         persist(next)
+    }
+
+    // ---- budget -------------------------------------------------------------
+
+    /**
+     * Posted when a spend crosses a milestone. Set once by [App]; kept as a callback so the ledger
+     * never imports NotificationManager and stays unit-testable.
+     */
+    @Volatile var onBudgetMilestone: ((milestone: Int, spentMinor: Long, limitMinor: Long) -> Unit)? = null
+
+    /**
+     * Recomputes the fired-milestone state at the moment of the change rather than leaving it, so
+     * lowering a limit below what you have already spent does not immediately fire every milestone
+     * underneath it.
+     */
+    fun setBudget(limitMinor: Long?, now: Long = System.currentTimeMillis()) = synchronized(lock) {
+        val d = _data.value
+        val zone = ZoneId.systemDefault()
+        val spent = Insights.spentInMonth(d.entries, Instant.ofEpochMilli(now), zone)
+        val next = d.copy(
+            monthlyBudgetMinor = limitMinor,
+            budgetMonth = Budget.monthKey(Instant.ofEpochMilli(now), zone),
+            highestMilestoneFired = if (limitMinor == null) 0
+            else Budget.reachedMilestone(spent, limitMinor),
+        )
+        _data.value = next
+        persist(next)
+    }
+
+    /**
+     * Must be called holding [lock], on the already-updated ledger. Returns the milestone to post,
+     * which the caller does outside the lock: a notification failure must not be able to hold the
+     * ledger lock or strand an entry that is already persisted.
+     */
+    private fun evaluateBudgetLocked(timestamp: Long): Int? {
+        val d = _data.value
+        val limit = d.monthlyBudgetMinor ?: return null
+        if (limit <= 0L) return null
+
+        val zone = ZoneId.systemDefault()
+        val instant = Instant.ofEpochMilli(timestamp)
+        val month = Budget.monthKey(instant, zone)
+
+        // The reset happens on the next transaction, which is the only moment it can matter. No
+        // alarm, no scheduled job, nothing running while the app is closed.
+        val fired = if (d.budgetMonth == month) d.highestMilestoneFired else 0
+
+        val spent = Insights.spentInMonth(d.entries, instant, zone)
+        val toFire = Budget.milestoneToFire(spent, limit, fired)
+
+        if (toFire != null || d.budgetMonth != month) {
+            val next = d.copy(
+                budgetMonth = month,
+                highestMilestoneFired = toFire ?: fired,
+            )
+            _data.value = next
+            persist(next)
+        }
+        return toFire
+    }
+
+    private fun postMilestone(milestone: Int?) {
+        val d = _data.value
+        val limit = d.monthlyBudgetMinor ?: return
+        if (milestone == null) return
+        val spent = Insights.spentInMonth(d.entries, Instant.now(), ZoneId.systemDefault())
+        onBudgetMilestone?.invoke(milestone, spent, limit)
     }
 
     // ---- categories + merchant rules ----------------------------------------
