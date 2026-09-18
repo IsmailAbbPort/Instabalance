@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The logo, inset so the adaptive-icon mask (circle/squircle) never crops the artwork.
+     108dp canvas, 18dp inset each side -> content sits in the center 72dp safe zone. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@mipmap/app_logo"
+    android:inset="18dp" />

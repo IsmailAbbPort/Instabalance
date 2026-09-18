@@ -1,0 +1,5 @@
+<resources>
+    <!-- App-wide theme is applied in Compose (MaterialTheme). This framework parent
+         just gives us a valid no-action-bar host theme with no extra dependency. -->
+    <style name="Theme.InstaBalance" parent="android:Theme.DeviceDefault.Light.NoActionBar" />
+</resources>
