@@ -78,16 +78,16 @@ The data never leaves the phone, so the threat model is someone holding the unlo
 ## Running it
 
 Open the project in Android Studio (Ladybug or newer) and run the `app` configuration on a device
-running Android 8.0 or later.
-
-> The Gradle wrapper is not committed yet, so there is no `./gradlew` at the repo root. Android
-> Studio will generate it on first sync, or run `gradle wrapper` with a local Gradle 8.10.2.
-
-Unit tests cover the parser, the money maths and the ledger rules:
+running Android 8.0 or later. From the command line you need JDK 17 or newer and an Android SDK
+with API 35; the Gradle wrapper handles the rest.
 
 ```
-./gradlew :app:testDebugUnitTest
+./gradlew :app:assembleDebug           # build
+./gradlew :app:testDebugUnitTest       # 31 unit tests
 ```
+
+The tests cover the parser (both languages, reversals, the ATM balance clause), the money maths,
+and the ledger rules including the dedupe window and the anchor-plus-delta calculation.
 
 On the device, three grants make the automatic capture work, all reachable from the in-app settings:
 notification access, the SMS permission, and an exemption from battery optimisation so the reader is
