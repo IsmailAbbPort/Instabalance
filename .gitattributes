@@ -1,0 +1,11 @@
+# Normalise text files, and keep the shell wrapper LF so it runs on Linux/macOS
+# even when it is edited on Windows.
+* text=auto eol=lf
+gradlew text eol=lf
+*.bat text eol=crlf
+
+*.jar binary
+*.png binary
+*.webp binary
+*.jpeg binary
+*.jpg binary
