@@ -5,7 +5,6 @@ import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
@@ -24,7 +23,7 @@ class MainActivity : FragmentActivity() {
         )
         LedgerRepository.init(applicationContext)
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme()) {
+            InstaBalanceTheme {
                 Surface(color = MaterialTheme.colorScheme.background) {
                     Gate()
                 }
@@ -49,7 +48,11 @@ private fun Gate() {
     val activity = LocalContext.current as? FragmentActivity
 
     if (!data.hasPasscode || unlocked) {
-        HomeScreen()
+        val nav = rememberNavStack()
+        when (nav.current) {
+            Route.HOME -> HomeScreen(onSettings = { nav.go(Route.SETTINGS) })
+            Route.SETTINGS -> SettingsScreen(onBack = { nav.back() })
+        }
     } else {
         LockScreen(activity, data.biometricEnabled) { LedgerRepository.markUnlocked() }
     }

@@ -8,8 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -21,7 +22,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,7 +45,7 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-internal fun HomeScreen() {
+internal fun HomeScreen(onSettings: () -> Unit) {
     val data by LedgerRepository.data.collectAsStateWithLifecycle()
     var dialog by remember { mutableStateOf(Dialog.NONE) }
 
@@ -54,35 +55,50 @@ internal fun HomeScreen() {
     Column(
         Modifier
             .fillMaxSize()
-            .systemBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .navigationBarsPadding()
     ) {
-        BalanceCard(balance, lastAnchor)
+        BrandHeader(
+            greeting = greetingForHour(),
+            title = "Fuck Instapay",
+            onSettings = onSettings,
+        )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { dialog = Dialog.CREDIT }, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Default.Add, null); Spacer(Modifier.width(4.dp)); Text("Received")
+        Column(
+            Modifier.padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Overlaps the header's rounded bottom edge, the way InstaPay's promo card sits over
+            // the purple. The negative offset is the whole reason the header is a fixed height.
+            BalanceCard(balance, lastAnchor, Modifier.offset(y = (-28).dp))
+
+            Row(
+                Modifier.offset(y = (-12).dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(onClick = { dialog = Dialog.CREDIT }, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Default.Add, null); Spacer(Modifier.width(4.dp)); Text("Received")
+                }
+                Button(onClick = { dialog = Dialog.DEBIT }, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Default.Remove, null); Spacer(Modifier.width(4.dp)); Text("Sent")
+                }
             }
-            Button(onClick = { dialog = Dialog.DEBIT }, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Default.Remove, null); Spacer(Modifier.width(4.dp)); Text("Sent")
+            OutlinedButton(
+                onClick = { dialog = Dialog.ANCHOR },
+                modifier = Modifier.fillMaxWidth().offset(y = (-12).dp)
+            ) {
+                Text("Set balance (re-sync from the real app)")
             }
-        }
-        OutlinedButton(onClick = { dialog = Dialog.ANCHOR }, modifier = Modifier.fillMaxWidth()) {
-            Text("Set balance (re-sync from the real app)")
-        }
 
-        Text("Recent activity", style = MaterialTheme.typography.titleMedium)
-        if (data.entries.isEmpty()) {
-            Text("Nothing yet. Add a transaction or set your balance.",
-                style = MaterialTheme.typography.bodyMedium)
-        } else {
-            EntryList(data.entries)
+            Text("Recent activity", style = MaterialTheme.typography.titleMedium)
+            if (data.entries.isEmpty()) {
+                Text("Nothing yet. Add a transaction or set your balance.",
+                    style = MaterialTheme.typography.bodyMedium)
+            } else {
+                EntryList(data.entries)
+            }
+            Spacer(Modifier.height(8.dp))
         }
-
-        HorizontalDivider()
-        SettingsPanel(data)
     }
 
     if (dialog != Dialog.NONE) {
@@ -104,22 +120,52 @@ internal fun HomeScreen() {
 }
 
 @Composable
-private fun BalanceCard(balanceMinor: Long, lastAnchor: Long?) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(
-            Modifier.fillMaxWidth().padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text("EGP", style = MaterialTheme.typography.titleMedium)
+private fun BalanceCard(balanceMinor: Long, lastAnchor: Long?, modifier: Modifier = Modifier) {
+    Card(
+        modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(20.dp)) {
             Text(
-                Money.formatMinor(balanceMinor),
-                fontSize = 44.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
+                "Available balance",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    Money.formatMinor(balanceMinor),
+                    fontSize = 38.sp,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.displaySmall,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "EGP",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+            }
             Spacer(Modifier.height(8.dp))
-            Text(syncedAgoText(lastAnchor), style = MaterialTheme.typography.bodySmall)
+            Text(
+                syncedAgoText(lastAnchor),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
+    }
+}
+
+/** Matches InstaPay's time-of-day greeting above the name. */
+private fun greetingForHour(): String {
+    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    return when (hour) {
+        in 5..11 -> "Good Morning"
+        in 12..16 -> "Good Afternoon"
+        else -> "Good Evening"
     }
 }
 
