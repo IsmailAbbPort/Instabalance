@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -39,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
@@ -49,7 +52,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SettingsScreen(onBack: () -> Unit) {
+internal fun SettingsScreen(
+    onBack: () -> Unit,
+    onCategories: () -> Unit,
+    onRules: () -> Unit,
+) {
     val data by LedgerRepository.data.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -77,7 +84,93 @@ internal fun SettingsScreen(onBack: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            BudgetSetting(data)
+            NavRow("Categories", "${data.categories.count { !it.hidden }} in use", onCategories)
+            NavRow("Merchant rules", "${data.merchantRules.size} saved", onRules)
             SettingsPanel(data)
+        }
+    }
+}
+
+@Composable
+private fun NavRow(title: String, subtitle: String, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Medium)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("›", fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/**
+ * The notification permission is asked for here, at the moment a budget is first set, rather than
+ * at app start where it has no context and gets refused out of hand.
+ */
+@Composable
+private fun BudgetSetting(data: LedgerData) {
+    val context = LocalContext.current
+    val activity = context as? FragmentActivity
+    var amount by remember(data.monthlyBudgetMinor) {
+        mutableStateOf(data.monthlyBudgetMinor?.let { Money.formatMinor(it) } ?: "")
+    }
+    val notificationsOn = NotificationManagerCompat.from(context).areNotificationsEnabled()
+
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Monthly budget", style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold)
+            Text(
+                "Alerts you at 25%, 50%, 75%, 90%, 100% and 120% of your limit. If one transaction " +
+                    "passes several at once, only the highest is sent.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = amount,
+                onValueChange = { amount = sanitizeAmount(it) },
+                label = { Text("Limit (EGP, blank = off)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = {
+                    val minor = if (amount.isBlank()) null else Money.parseToMinor(amount)
+                    LedgerRepository.setBudget(minor)
+                    if (minor != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        !notificationsOn && activity != null
+                    ) {
+                        ActivityCompat.requestPermissions(
+                            activity, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1002
+                        )
+                    }
+                }) { Text("Save budget") }
+            }
+            if (data.monthlyBudgetMinor != null && !notificationsOn) {
+                // Say so rather than letting the user believe alerts are armed when they are not.
+                Text(
+                    "Notifications are turned off for this app, so the budget card on Home will " +
+                        "update but no alerts will be sent.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
         }
     }
 }

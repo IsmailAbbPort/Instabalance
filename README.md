@@ -24,6 +24,38 @@ Because the balance is recomputed from the anchor forward, a missed or mis-parse
 drift you until your next re-sync, and it can never corrupt a stored total. The home screen shows
 how stale the anchor is (`today`, `3 days ago`) so you know how far to trust the figure.
 
+## Expense tracking
+
+Every transaction can carry a category, and the charts on the home screen are built from them: a
+tappable ring of spend by category (toggling between expenses and income), daily and monthly bars,
+and this month measured against the same days of last month rather than against a whole month,
+which would make every early-month figure look like a collapse.
+
+The interesting problem is that **transactions arrive on their own**. Every other expense tracker
+has a human typing each entry and picking a category in the same breath; this one has a notification
+listener firing at 2am. So categorisation is built around what the message actually tells us:
+
+- A card purchase names the shop (`من PAYMOB RAF SPECIALIT CAIRO`). File it once and the app offers
+  to remember it, so every future PAYMOB charge files itself, even while the app is closed.
+- An InstaPay send seen as a bank SMS names **nobody** (`IPN REF# 19825518418`). There is genuinely
+  nothing to learn from, so those land in a review inbox and the empty state says so plainly instead
+  of pretending the app will eventually work it out.
+
+A rule never rewrites history on its own. Entries filed by a rule are marked as such, so changing a
+rule can offer to update the ones it filed while never touching a category a person chose by hand.
+
+## Budgets
+
+Set a monthly limit and the app alerts at 25, 50, 75, 90, 100 and 120 percent. If one transaction
+passes several thresholds at once, only the highest is sent.
+
+That rule is not special-cased. The whole thing reduces to one stored integer: the app asks only for
+the highest milestone at or below the current percentage, and fires it only if it beats what is
+already stored for this month. An expense taking you from 20 to 80 percent therefore fires 75 once,
+and 25 and 50 never fire at all. The same shape gives three more properties for free: no milestone
+fires twice, a refund that drops you back under a threshold does not re-arm it, and lowering your
+limit mid-month recomputes rather than retro-firing everything beneath it.
+
 Two details that matter more than they look:
 
 - **Money is integer piastres, never `Double`.** `0.1 + 0.2 != 0.3` in floating point, and that
@@ -83,11 +115,17 @@ with API 35; the Gradle wrapper handles the rest.
 
 ```
 ./gradlew :app:assembleDebug           # build
-./gradlew :app:testDebugUnitTest       # 31 unit tests
+./gradlew :app:testDebugUnitTest       # 125 unit tests
 ```
 
-The tests cover the parser (both languages, reversals, the ATM balance clause), the money maths,
-and the ledger rules including the dedupe window and the anchor-plus-delta calculation.
+The tests cover the parser (both languages, reversals, the ATM balance clause, merchant
+extraction), the money maths, the ledger rules including the dedupe window and the
+anchor-plus-delta calculation, the budget milestone logic, the aggregates (including Cairo DST and
+month-boundary bucketing), the schema compatibility of an old `ledger.enc`, and the contrast of
+every chart colour against white.
+
+Everything that could be wrong about money or time is a pure function outside a Composable, which
+is why the whole suite runs on the JVM with no Robolectric and no instrumentation.
 
 On the device, three grants make the automatic capture work, all reachable from the in-app settings:
 notification access, the SMS permission, and an exemption from battery optimisation so the reader is

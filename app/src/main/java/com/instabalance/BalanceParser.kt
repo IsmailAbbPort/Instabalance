@@ -26,7 +26,7 @@ object BalanceParser {
     private val arabicAmountLabelled = Regex("""(?:بمبلغ|مبلغ)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)""")
     // Any "<number> ج" (covers جم / ج.م). Used only after the balance clause is stripped out.
     private val arabicAmountBeforeCurrency = Regex("""([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*ج""")
-    // The available-balance clause, e.g. "الرصيد المتاح 2091.36جم" — must NOT be read as the amount.
+    // The available-balance clause, e.g. "الرصيد المتاح 2091.36جم". Must NOT be read as the amount.
     private val arabicBalanceClause = Regex("""الرصيد\s*المتاح\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*ج""")
 
     // ---- Merchant / counterparty extraction -------------------------------

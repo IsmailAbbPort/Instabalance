@@ -50,8 +50,18 @@ private fun Gate() {
     if (!data.hasPasscode || unlocked) {
         val nav = rememberNavStack()
         when (nav.current) {
-            Route.HOME -> HomeScreen(onSettings = { nav.go(Route.SETTINGS) })
-            Route.SETTINGS -> SettingsScreen(onBack = { nav.back() })
+            Route.HOME -> HomeScreen(
+                onSettings = { nav.go(Route.SETTINGS) },
+                onInbox = { nav.go(Route.INBOX) },
+            )
+            Route.INBOX -> InboxScreen(onBack = { nav.back() })
+            Route.SETTINGS -> SettingsScreen(
+                onBack = { nav.back() },
+                onCategories = { nav.go(Route.CATEGORIES) },
+                onRules = { nav.go(Route.RULES) },
+            )
+            Route.CATEGORIES -> CategoriesScreen(onBack = { nav.back() })
+            Route.RULES -> RulesScreen(onBack = { nav.back() })
         }
     } else {
         LockScreen(activity, data.biometricEnabled) { LedgerRepository.markUnlocked() }
