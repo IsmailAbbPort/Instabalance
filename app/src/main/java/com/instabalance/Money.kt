@@ -21,6 +21,20 @@ object Money {
         }
     }
 
+    /**
+     * 123450 -> "1.2k". For chart axes, where the full "1,234.50" is wider than the space and the
+     * reader only needs the order of magnitude. Never used for a figure someone might act on.
+     */
+    fun formatCompactMinor(minor: Long): String {
+        val pounds = kotlin.math.abs(minor) / 100
+        val sign = if (minor < 0) "-" else ""
+        return when {
+            pounds >= 1_000_000 -> "$sign${pounds / 1_000_000}.${(pounds % 1_000_000) / 100_000}m"
+            pounds >= 1_000 -> "$sign${pounds / 1_000}.${(pounds % 1_000) / 100}k"
+            else -> "$sign$pounds"
+        }
+    }
+
     /** 123450 -> "1,234.50". */
     fun formatMinor(minor: Long): String {
         val negative = minor < 0

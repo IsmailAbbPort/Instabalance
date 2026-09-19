@@ -16,6 +16,60 @@ class CategoriesTest {
         assertEquals(ids.size, ids.toSet().size)
     }
 
+    @Test fun everyPresetHasItsOwnColour() {
+        // Two categories sharing a colour makes the ring unreadable. There are 19 presets and 20
+        // ramp colours, so there is no excuse for a collision.
+        val colours = Categories.PRESETS.map { it.colorIndex }
+        assertEquals(colours.size, colours.toSet().size)
+    }
+
+    @Test fun addRefusesATakenColourAndFindsAFreeOne() {
+        val taken = Categories.byId(Categories.PRESETS, "rent")!!.colorIndex
+        val out = Categories.add(Categories.PRESETS, "Gym", CategoryKind.EXPENSE, taken)
+
+        val added = out.last()
+        assertTrue("picked $taken, which rent already holds", added.colorIndex != taken)
+        assertTrue(added.colorIndex !in Categories.takenColours(Categories.PRESETS))
+    }
+
+    @Test fun addKeepsAFreeColourWhenAsked() {
+        val free = Categories.firstFreeColour(Categories.PRESETS)!!
+        val out = Categories.add(Categories.PRESETS, "Gym", CategoryKind.EXPENSE, free)
+        assertEquals(free, out.last().colorIndex)
+    }
+
+    @Test fun recolourRefusesAColourAnotherCategoryHolds() {
+        val rentColour = Categories.byId(Categories.PRESETS, "rent")!!.colorIndex
+        val out = Categories.recolour(Categories.PRESETS, "groceries", rentColour)
+
+        // Unchanged, so the greyed-out swatch in the UI and this agree.
+        assertEquals(Categories.PRESETS, out)
+    }
+
+    @Test fun recolourAllowsACategoryToKeepItsOwnColour() {
+        val own = Categories.byId(Categories.PRESETS, "rent")!!.colorIndex
+        val out = Categories.recolour(Categories.PRESETS, "rent", own)
+        assertEquals(own, Categories.byId(out, "rent")?.colorIndex)
+    }
+
+    @Test fun firstFreeColourRunsOutRatherThanWrapping() {
+        // Twenty colours, so the twenty-first category has none. Null is the honest answer and the
+        // UI says so, instead of silently handing out a duplicate.
+        var cats = Categories.PRESETS
+        while (Categories.firstFreeColour(cats) != null) {
+            cats = Categories.add(cats, "x", CategoryKind.EXPENSE, Categories.firstFreeColour(cats)!!)
+        }
+        assertEquals(ChartPalette.RAMP.size, Categories.takenColours(cats).size)
+        assertNull(Categories.firstFreeColour(cats))
+    }
+
+    @Test fun takenColoursCanExcludeTheCategoryBeingEdited() {
+        // A category's own colour is not taken as far as it is concerned.
+        val own = Categories.byId(Categories.PRESETS, "rent")!!.colorIndex
+        assertTrue(own in Categories.takenColours(Categories.PRESETS))
+        assertTrue(own !in Categories.takenColours(Categories.PRESETS, excludingId = "rent"))
+    }
+
     @Test fun presetColourIndicesAreInsideTheRamp() {
         // A stored index out of range would blow up at draw time, not here, so pin it here.
         Categories.PRESETS.forEach {
@@ -76,13 +130,21 @@ class CategoriesTest {
     }
 
     @Test fun presetsCanStillBeRecoloured() {
-        val out = Categories.recolour(Categories.PRESETS, "groceries", 4)
-        assertEquals(4, Categories.byId(out, "groceries")?.colorIndex)
+        // Onto a free colour: 19 presets hold 19 of the 20, so exactly one is spare.
+        val free = Categories.firstFreeColour(Categories.PRESETS)!!
+        val out = Categories.recolour(Categories.PRESETS, "groceries", free)
+        assertEquals(free, Categories.byId(out, "groceries")?.colorIndex)
     }
 
     @Test fun recolourClampsIntoTheRamp() {
-        val out = Categories.recolour(Categories.PRESETS, "groceries", 999)
-        assertEquals(ChartPalette.RAMP.lastIndex, Categories.byId(out, "groceries")?.colorIndex)
+        // Two categories only, so the clamp target is not blocked by the uniqueness rule and this
+        // tests the clamp rather than the collision.
+        val two = listOf(
+            Category("a", "A", CategoryKind.EXPENSE, 0),
+            Category("b", "B", CategoryKind.EXPENSE, 1),
+        )
+        val out = Categories.recolour(two, "a", 999)
+        assertEquals(ChartPalette.RAMP.lastIndex, Categories.byId(out, "a")?.colorIndex)
     }
 
     @Test fun ensurePresetsAppendsOnlyWhatIsMissing() {
@@ -94,8 +156,9 @@ class CategoriesTest {
 
     @Test fun ensurePresetsLeavesRecolouredPresetsAlone() {
         // An upgrade must not undo the user's colour choice.
-        val recoloured = Categories.recolour(Categories.PRESETS, "rent", 6)
-        assertEquals(6, Categories.byId(Categories.ensurePresets(recoloured), "rent")?.colorIndex)
+        val free = Categories.firstFreeColour(Categories.PRESETS)!!
+        val recoloured = Categories.recolour(Categories.PRESETS, "rent", free)
+        assertEquals(free, Categories.byId(Categories.ensurePresets(recoloured), "rent")?.colorIndex)
     }
 
     @Test fun byIdReturnsNullForUnknownAndForNull() {

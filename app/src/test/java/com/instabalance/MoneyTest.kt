@@ -6,6 +6,29 @@ import org.junit.Test
 
 class MoneyTest {
 
+    // ---- Compact form, used only on chart axes where the full figure will not fit ----
+
+    @Test fun compactShowsWholePoundsUnderAThousand() {
+        assertEquals("0", Money.formatCompactMinor(0))
+        assertEquals("7", Money.formatCompactMinor(750))          // 7.50 EGP
+        assertEquals("999", Money.formatCompactMinor(99_999))     // 999.99 EGP
+    }
+
+    @Test fun compactSwitchesToThousands() {
+        assertEquals("1.0k", Money.formatCompactMinor(100_000))   // 1,000 EGP
+        assertEquals("1.5k", Money.formatCompactMinor(150_000))
+        assertEquals("12.3k", Money.formatCompactMinor(1_234_500))
+    }
+
+    @Test fun compactSwitchesToMillions() {
+        assertEquals("1.0m", Money.formatCompactMinor(100_000_000))
+        assertEquals("2.5m", Money.formatCompactMinor(250_000_000))
+    }
+
+    @Test fun compactKeepsTheSign() {
+        assertEquals("-1.5k", Money.formatCompactMinor(-150_000))
+    }
+
     @Test fun parsesPlainInteger() {
         assertEquals(10000L, Money.parseToMinor("100"))
     }

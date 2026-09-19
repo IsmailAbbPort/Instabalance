@@ -181,41 +181,64 @@ internal fun BarChart(
     val highlight = MaterialTheme.colorScheme.secondary
     val grid = MaterialTheme.colorScheme.outline
 
+    val chartHeight = 140.dp
+    val axisLabel = MaterialTheme.typography.labelSmall
+    val axisColour = MaterialTheme.colorScheme.onSurfaceVariant
+
     Column(modifier.fillMaxWidth()) {
-        Canvas(Modifier.fillMaxWidth().height(140.dp)) {
-            val count = buckets.size
-            if (count == 0) return@Canvas
-
-            repeat(3) { i ->
-                val y = size.height * (i + 1) / 4f
-                drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+        Row(Modifier.fillMaxWidth()) {
+            // The y axis lives outside the Canvas as ordinary Text, aligned to the same quarters
+            // the gridlines use. Measuring text inside a Canvas under a scroll container has known
+            // placement quirks, and an axis that drifts is worse than no axis.
+            Column(
+                Modifier.height(chartHeight).padding(end = 6.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.End,
+            ) {
+                // Top to bottom: full scale, three quarters, half, quarter, zero.
+                listOf(1.0, 0.75, 0.5, 0.25, 0.0).forEach { fraction ->
+                    Text(
+                        Money.formatCompactMinor((max * fraction).toLong()),
+                        style = axisLabel,
+                        color = axisColour,
+                    )
+                }
             }
-            drawLine(grid, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2f)
 
-            if (max <= 0L) return@Canvas
-            val slot = size.width / count
-            val width = (slot * 0.6f).coerceAtMost(28.dp.toPx())
-            val radius = androidx.compose.ui.geometry.CornerRadius(width / 3f, width / 3f)
+            Canvas(Modifier.weight(1f).height(chartHeight)) {
+                val count = buckets.size
+                if (count == 0) return@Canvas
 
-            buckets.forEachIndexed { i, b ->
-                if (b.amountMinor <= 0L) return@forEachIndexed
-                val h = size.height * (b.amountMinor.toFloat() / max.toFloat())
-                val x = slot * i + (slot - width) / 2f
-                drawRoundRect(
-                    color = if (highlightLast && i == count - 1) highlight else bar,
-                    topLeft = Offset(x, size.height - h),
-                    size = Size(width, h),
-                    cornerRadius = radius,
-                )
+                repeat(3) { i ->
+                    val y = size.height * (i + 1) / 4f
+                    drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+                }
+                drawLine(grid, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2f)
+
+                if (max <= 0L) return@Canvas
+                val slot = size.width / count
+                val width = (slot * 0.6f).coerceAtMost(28.dp.toPx())
+                val radius = androidx.compose.ui.geometry.CornerRadius(width / 3f, width / 3f)
+
+                buckets.forEachIndexed { i, b ->
+                    if (b.amountMinor <= 0L) return@forEachIndexed
+                    val h = size.height * (b.amountMinor.toFloat() / max.toFloat())
+                    val x = slot * i + (slot - width) / 2f
+                    drawRoundRect(
+                        color = if (highlightLast && i == count - 1) highlight else bar,
+                        topLeft = Offset(x, size.height - h),
+                        size = Size(width, h),
+                        cornerRadius = radius,
+                    )
+                }
             }
         }
         if (buckets.size >= 2) {
             Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(buckets.first().label, style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(buckets.last().label, style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(buckets.first().label, style = axisLabel, color = axisColour)
+                Text("EGP", style = axisLabel, color = axisColour)
+                Text(buckets.last().label, style = axisLabel, color = axisColour)
             }
         }
     }

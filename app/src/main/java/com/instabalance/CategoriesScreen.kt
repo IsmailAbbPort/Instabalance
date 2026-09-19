@@ -87,17 +87,43 @@ internal fun CategoriesScreen(onBack: () -> Unit) {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(data.categories, key = { it.id }) { category ->
-                CategoryRow(
-                    category = category,
-                    onEdit = { editing = category.id },
-                    onToggleHidden = { LedgerRepository.setCategoryHidden(category.id, it) },
-                )
+            // Split by direction, because you look for a category by what it is for. Anything
+            // marked BOTH appears under each heading: it is genuinely used in both places.
+            listOf(
+                "Expenses" to EntryType.DEBIT,
+                "Income" to EntryType.CREDIT,
+            ).forEach { (heading, type) ->
+                val wanted = when (type) {
+                    EntryType.CREDIT -> CategoryKind.INCOME
+                    else -> CategoryKind.EXPENSE
+                }
+                val section = data.categories.filter {
+                    it.kind == wanted || it.kind == CategoryKind.BOTH
+                }
+
+                item(key = "header_$heading") {
+                    Text(
+                        heading,
+                        Modifier.padding(top = 8.dp, bottom = 2.dp),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                items(section, key = { "${heading}_${it.id}" }) { category ->
+                    CategoryRow(
+                        category = category,
+                        onEdit = { editing = category.id },
+                        onToggleHidden = { LedgerRepository.setCategoryHidden(category.id, it) },
+                    )
+                }
             }
+
             item {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Hiding keeps every transaction filed under a category and keeps it in your " +
+                    "Categories used for both, like a family transfer, appear under each heading.\n\n" +
+                        "Hiding keeps every transaction filed under a category and keeps it in your " +
                         "charts. It only stops the category being offered when you file something new.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -111,6 +137,8 @@ internal fun CategoriesScreen(onBack: () -> Unit) {
             CategoryEditSheet(
                 category = category,
                 entryCount = Categories.entryCount(data.entries, id),
+                // A category's own colour is not "taken" as far as it is concerned.
+                takenColours = Categories.takenColours(data.categories, excludingId = id),
                 onDismiss = { editing = null },
             )
         }
@@ -118,7 +146,7 @@ internal fun CategoriesScreen(onBack: () -> Unit) {
 
     if (creating) {
         NewCategorySheet(
-            takenColours = data.categories.map { it.colorIndex },
+            takenColours = Categories.takenColours(data.categories),
             onDismiss = { creating = false },
         )
     }
@@ -126,7 +154,7 @@ internal fun CategoriesScreen(onBack: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun NewCategorySheet(takenColours: List<Int>, onDismiss: () -> Unit) {
+private fun NewCategorySheet(takenColours: Set<Int>, onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var name by remember { mutableStateOf("") }
     var kind by remember { mutableStateOf(CategoryKind.EXPENSE) }
@@ -175,11 +203,15 @@ private fun NewCategorySheet(takenColours: List<Int>, onDismiss: () -> Unit) {
             Text("Colour", style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 ChartPalette.RAMP.indices.forEach { i ->
                     Swatch(
                         colour = Color(ChartPalette.forIndex(i)),
                         selected = i == colour,
+                        taken = i in takenColours,
                         onClick = { colour = i },
                     )
                 }
@@ -230,7 +262,12 @@ private fun CategoryRow(category: Category, onEdit: () -> Unit, onToggleHidden: 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun CategoryEditSheet(category: Category, entryCount: Int, onDismiss: () -> Unit) {
+private fun CategoryEditSheet(
+    category: Category,
+    entryCount: Int,
+    takenColours: Set<Int>,
+    onDismiss: () -> Unit,
+) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var name by remember(category.id) { mutableStateOf(category.name) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -260,14 +297,26 @@ private fun CategoryEditSheet(category: Category, entryCount: Int, onDismiss: ()
             Text("Colour", style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 ChartPalette.RAMP.indices.forEach { i ->
                     Swatch(
                         colour = Color(ChartPalette.forIndex(i)),
                         selected = i == category.colorIndex,
+                        taken = i in takenColours,
                         onClick = { LedgerRepository.recolourCategory(category.id, i) },
                     )
                 }
+            }
+            if (takenColours.size >= ChartPalette.RAMP.size) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Every colour is in use. Free one up by recolouring or deleting another category.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             Spacer(Modifier.height(20.dp))
             Row {
@@ -319,12 +368,17 @@ private fun CategoryEditSheet(category: Category, entryCount: Int, onDismiss: ()
     }
 }
 
+/**
+ * A colour another category already holds is shown faded and cannot be picked. Two categories
+ * sharing a colour makes the ring unreadable, which is the one thing the colour exists to prevent.
+ */
 @Composable
-private fun Swatch(colour: Color, selected: Boolean, onClick: () -> Unit) {
+private fun Swatch(colour: Color, selected: Boolean, taken: Boolean, onClick: () -> Unit) {
     androidx.compose.material3.Surface(
         onClick = onClick,
+        enabled = !taken,
         shape = androidx.compose.foundation.shape.CircleShape,
-        color = colour,
+        color = if (taken) colour.copy(alpha = 0.22f) else colour,
         border = if (selected) {
             androidx.compose.foundation.BorderStroke(3.dp, MaterialTheme.colorScheme.onSurface)
         } else null,

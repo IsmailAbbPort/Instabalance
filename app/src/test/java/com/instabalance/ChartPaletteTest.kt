@@ -52,9 +52,50 @@ class ChartPaletteTest {
         assertEquals(ChartPalette.RAMP.size, ChartPalette.RAMP.toSet().size)
     }
 
-    @Test fun rampIsBigEnoughForTheTopNRollup() {
-        // The ring rolls up beyond the top 7, so the ramp must comfortably cover that plus a legend.
-        assertTrue(ChartPalette.RAMP.size >= 10)
+    @Test fun rampHasTwentyColours() {
+        // Twenty is the ceiling on categories that can each hold a unique colour.
+        assertEquals(20, ChartPalette.RAMP.size)
+    }
+
+    /** CIE Lab, so "different" means different to an eye rather than different in hex. */
+    private fun lab(argb: Long): Triple<Double, Double, Double> {
+        fun ch(c: Long): Double {
+            val s = c / 255.0
+            return if (s <= 0.03928) s / 12.92 else Math.pow((s + 0.055) / 1.055, 2.4)
+        }
+        val r = ch((argb shr 16) and 0xFF); val g = ch((argb shr 8) and 0xFF); val b = ch(argb and 0xFF)
+        val x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+        val y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        val z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+        fun fi(t: Double) = if (t > 0.008856) Math.cbrt(t) else 7.787 * t + 16.0 / 116.0
+        return Triple(116 * fi(y) - 16, 500 * (fi(x) - fi(y)), 200 * (fi(y) - fi(z)))
+    }
+
+    private fun deltaE(a: Long, b: Long): Double {
+        val (l1, a1, b1) = lab(a); val (l2, a2, b2) = lab(b)
+        return Math.sqrt((l1 - l2) * (l1 - l2) + (a1 - a2) * (a1 - a2) + (b1 - b2) * (b1 - b2))
+    }
+
+    @Test fun everyPairOfRampColoursIsClearlyDifferent() {
+        // 2.3 is roughly the threshold of "just about tellable apart"; a chart needs far more than
+        // that, because two slices are compared across a gap rather than side by side. Picking
+        // twenty colours by eye reliably produces pairs that fail this while looking fine in a row.
+        var worst = Double.MAX_VALUE
+        var pair = ""
+        for (i in ChartPalette.RAMP.indices) {
+            for (j in i + 1 until ChartPalette.RAMP.size) {
+                val d = deltaE(ChartPalette.RAMP[i], ChartPalette.RAMP[j])
+                if (d < worst) { worst = d; pair = "$i/$j" }
+            }
+        }
+        assertTrue("closest pair $pair is only %.1f apart".format(worst), worst >= 15.0)
+    }
+
+    @Test fun neitherNeutralCollidesWithTheRamp() {
+        ChartPalette.RAMP.forEach {
+            assertTrue(deltaE(it, ChartPalette.UNCATEGORISED) >= 15.0)
+            assertTrue(deltaE(it, ChartPalette.OTHER_ROLLUP) >= 15.0)
+        }
     }
 
     @Test fun forIndexWrapsInsteadOfThrowing() {

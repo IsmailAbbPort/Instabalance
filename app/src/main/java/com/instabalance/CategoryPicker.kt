@@ -150,8 +150,11 @@ internal fun CategoryPickerSheet(
                         onClick = {
                             val kind = if (entry.type == EntryType.CREDIT) CategoryKind.INCOME
                             else CategoryKind.EXPENSE
+                            // First unused colour, so a category made mid-triage does not come out
+                            // looking identical to one that already exists.
                             val id = LedgerRepository.addCategory(
-                                newName, kind, data.categories.size % ChartPalette.RAMP.size
+                                newName, kind,
+                                Categories.firstFreeColour(data.categories) ?: 0,
                             )
                             pick(id)
                         },
