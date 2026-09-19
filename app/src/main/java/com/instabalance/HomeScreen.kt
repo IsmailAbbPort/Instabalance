@@ -63,17 +63,18 @@ internal fun HomeScreen(onSettings: () -> Unit, onInbox: () -> Unit) {
         )
 
         Column(
-            Modifier.padding(horizontal = 16.dp),
+            Modifier
+                // The whole content block rides up into the header, the way InstaPay's promo card
+                // sits over the purple, so purple stays visible down both sides of the card. Done
+                // once here rather than per item, or every offset would leave its layout gap
+                // behind. The matching Spacer at the bottom gives the scroll its height back.
+                .offset(y = (-84).dp)
+                .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Overlaps the header's rounded bottom edge, the way InstaPay's promo card sits over
-            // the purple. The negative offset is the whole reason the header is a fixed height.
-            BalanceCard(balance, lastAnchor, Modifier.offset(y = (-28).dp))
+            BalanceCard(balance, lastAnchor)
 
-            Row(
-                Modifier.offset(y = (-12).dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 // Orange, not violet: in InstaPay the violet is identity (header, active nav) and
                 // orange is every interactive affordance. Purple buttons read as the wrong app.
                 Button(
@@ -99,7 +100,7 @@ internal fun HomeScreen(onSettings: () -> Unit, onInbox: () -> Unit) {
             }
             OutlinedButton(
                 onClick = { dialog = Dialog.ANCHOR },
-                modifier = Modifier.fillMaxWidth().offset(y = (-12).dp),
+                modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.outlinedButtonColors(
                     contentColor = MaterialTheme.colorScheme.secondary,
                 ),
@@ -122,7 +123,8 @@ internal fun HomeScreen(onSettings: () -> Unit, onInbox: () -> Unit) {
                 Spacer(Modifier.height(4.dp))
                 InsightsSection(data)
             }
-            Spacer(Modifier.height(8.dp))
+            // Gives back the height the offset above took out of the scroll.
+            Spacer(Modifier.height(92.dp))
         }
     }
 

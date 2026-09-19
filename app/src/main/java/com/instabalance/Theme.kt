@@ -38,6 +38,7 @@ private val Muted = Color(0xFF9A9AA5)
  */
 data class BrandColors(
     val violetBright: Color = VioletBright,
+    val violetDeep: Color = VioletDeep,
     val positive: Color = Color(0xFF0F7A5C),
     val positiveContainer: Color = Color(0xFFCDF3E4),
     val sentBadge: Color = Color(0xFF2E6BFF),
