@@ -106,6 +106,14 @@ fun applyCategory(entries: List<Entry>, ids: Set<String>, categoryId: String?): 
     }
 
 /**
+ * Pure note assignment, kept beside [applyCategory] and out of the repository for the same reason:
+ * it can then be tested without the Keystore. Unlike a category, a note is allowed on an ANCHOR,
+ * because "checked the real app after the ATM" is exactly the kind of thing worth writing down.
+ */
+fun applyNote(entries: List<Entry>, id: String, note: String): List<Entry> =
+    entries.map { if (it.id == id) it.copy(note = note.trim()) else it }
+
+/**
  * Single source of truth for the ledger. It is an `object` (singleton) so the UI, the
  * notification listener, and the SMS receiver all read/write the same in-memory state.
  * All of them run in the same app process, so this is safe; writes are synchronized.
@@ -210,6 +218,12 @@ object LedgerRepository {
         addEntry(Entry(type = EntryType.ANCHOR, amountMinor = amountMinor, timestamp = timestamp,
             source = Source.MANUAL, note = note))
     }
+
+    /**
+     * Saved on an explicit tap rather than on every keystroke: a write re-encrypts and rewrites the
+     * whole ledger, which is not something to do per character typed.
+     */
+    fun setNote(id: String, note: String) = mutate { it.copy(entries = applyNote(it.entries, id, note)) }
 
     fun deleteEntry(id: String) = synchronized(lock) {
         val next = _data.value.copy(entries = _data.value.entries.filterNot { it.id == id })

@@ -146,7 +146,7 @@ internal fun HomeScreen(onSettings: () -> Unit, onInbox: () -> Unit, onAllTransa
 
     detail?.let { entry ->
         EntryDetailSheet(
-            entry = entry,
+            original = entry,
             data = data,
             onDismiss = { detail = null },
             onChangeCategory = { detail = null; picking = entry },

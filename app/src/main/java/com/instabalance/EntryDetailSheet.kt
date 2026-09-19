@@ -13,6 +13,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -35,7 +36,7 @@ import androidx.compose.ui.unit.dp
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun EntryDetailSheet(
-    entry: Entry,
+    original: Entry,
     data: LedgerData,
     onDismiss: () -> Unit,
     onChangeCategory: () -> Unit,
@@ -43,6 +44,11 @@ internal fun EntryDetailSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var confirmDelete by remember { mutableStateOf(false) }
     var showRaw by remember { mutableStateOf(false) }
+
+    // Resolved from the live ledger by id, not the snapshot the caller captured on tap: saving a
+    // note here would otherwise leave the sheet rendering the entry as it was before the save.
+    val entry = data.entries.firstOrNull { it.id == original.id } ?: original
+    var note by remember(original.id) { mutableStateOf(entry.note) }
 
     val category = Categories.byId(data.categories, entry.categoryId)
     val sign = when (entry.type) {
@@ -95,6 +101,25 @@ internal fun EntryDetailSheet(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = note,
+                onValueChange = { note = it },
+                label = { Text("Note") },
+                placeholder = { Text("What was this for?") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            // Only once there is something to save, so the sheet is not permanently offering an
+            // action that would do nothing.
+            if (note.trim() != entry.note) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { LedgerRepository.setNote(entry.id, note) }) {
+                        Text("Save note")
+                    }
+                    TextButton(onClick = { note = entry.note }) { Text("Cancel") }
                 }
             }
 

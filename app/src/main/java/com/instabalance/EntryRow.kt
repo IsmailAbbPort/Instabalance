@@ -61,6 +61,15 @@ internal fun EntryRow(e: Entry, data: LedgerData, onOpen: (Entry) -> Unit) {
             }
             Spacer(Modifier.height(4.dp))
             Text(e.displayCounterparty(), style = MaterialTheme.typography.bodyMedium)
+            // Only when it is not already the line above: displayCounterparty falls back to the
+            // note when the message named nobody, which is most of them.
+            if (e.note.isNotBlank() && e.note != e.displayCounterparty()) {
+                Text(
+                    e.note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
                 e.displayDate(),
                 style = MaterialTheme.typography.bodySmall,
