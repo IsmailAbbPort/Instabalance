@@ -17,10 +17,12 @@ captures/
 *.keystore
 keystore.properties
 
-# Screenshots of the real InstaPay app, kept locally as measurement references only.
-# The numbers taken from them live in the code; their pixels are not ours to publish.
+# Screenshots and brand assets of the real InstaPay app, kept locally as measurement
+# references only. The numbers taken from them live in the code; their pixels are not ours
+# to publish.
 docs/reference/instapay-home.*
 docs/reference/instapay-lock-screen.*
+docs/reference/instapay-logo.*
 docs/reference/WhatsApp*
 
 # OS
