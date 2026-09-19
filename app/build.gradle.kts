@@ -1,8 +1,32 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+/**
+ * Release signing, kept out of the repo. Create `keystore.properties` next to this file's root with:
+ *
+ *     storeFile=instabalance-release.jks
+ *     storePassword=...
+ *     keyAlias=instabalance
+ *     keyPassword=...
+ *
+ * Both that file and *.jks are gitignored. Without them the release build is simply unsigned, so a
+ * fresh clone and CI still build. Losing the .jks means this app can never be updated again, so
+ * keep a copy somewhere that is not just this machine.
+ */
+private val keystorePropsFile = rootProject.file("keystore.properties")
+private val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        // Notepad and PowerShell's utf8 encoder both prepend a byte-order mark, which Properties
+        // reads as part of the first key's name. The build then fails with "path may not be null",
+        // which points nowhere near the cause.
+        keystorePropsFile.readText().removePrefix("﻿").reader().use { load(it) }
+    }
 }
 
 android {
@@ -17,9 +41,23 @@ android {
         versionName = "1.0"
     }
 
+    signingConfigs {
+        if (keystorePropsFile.exists()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

@@ -107,6 +107,7 @@ internal fun SettingsScreen(
                 onRules,
             )
             SettingsPanel(data)
+            BackupSection(data)
             if (BuildConfig.DEBUG) DeveloperTools()
         }
     }
@@ -405,6 +406,142 @@ private fun SettingsPanel(data: LedgerData) {
 
     if (showPasscodeSetup) {
         PasscodeSetupDialog(onDismiss = { showPasscodeSetup = false })
+    }
+}
+
+/**
+ * Export and import, which is the only way data leaves this app.
+ *
+ * The ledger is encrypted with an Android Keystore key that is destroyed when the app is
+ * uninstalled, so `ledger.enc` cannot be restored from any phone backup: the file survives and the
+ * key does not. That makes this the real backup, and the reason it writes plain JSON to a location
+ * the user picks rather than somewhere of our choosing.
+ */
+@Composable
+private fun BackupSection(data: LedgerData) {
+    val context = LocalContext.current
+    var status by remember { mutableStateOf<String?>(null) }
+    var failure by remember { mutableStateOf<String?>(null) }
+    var pending by remember { mutableStateOf<BackupFile?>(null) }
+
+    val exporter = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val text = Backup.encode(data, System.currentTimeMillis(), BuildConfig.VERSION_NAME)
+        status = runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+                ?: error("no stream")
+            "Saved ${data.entries.size} transactions."
+        }.getOrElse { "Could not write to that location. Try somewhere else." }
+    }
+
+    val importer = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val text = runCatching {
+            context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+        }.getOrNull()
+        if (text == null) {
+            failure = "That file could not be read."
+            return@rememberLauncherForActivityResult
+        }
+        when (val parsed = Backup.decode(text)) {
+            is BackupParse.Ok -> pending = parsed.file
+            is BackupParse.Failed -> failure = parsed.reason
+        }
+    }
+
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Backup", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Uninstalling the app destroys the key your data is encrypted with, and no phone " +
+                    "backup can bring it back. Save a copy somewhere you keep things, and do it " +
+                    "before you reinstall or change phones.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = {
+                    // The picker is another app, so the re-lock on leaving would otherwise bounce
+                    // the user to the passcode on the way back.
+                    LedgerRepository.suppressNextLock()
+                    status = null
+                    exporter.launch(Backup.suggestedFileName(System.currentTimeMillis()))
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Export a backup") }
+
+            OutlinedButton(
+                onClick = {
+                    LedgerRepository.suppressNextLock()
+                    status = null
+                    importer.launch(arrayOf("application/json", "text/plain", "*/*"))
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Restore from a backup") }
+
+            Text(
+                "The export holds your transactions, categories, rules and budget. It does not " +
+                    "hold your passcode or any captured message text.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            status?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+
+    pending?.let { file ->
+        val summary = Backup.summarise(file.data)
+        val range = Backup.describeRange(summary)
+        AlertDialog(
+            onDismissRequest = { pending = null },
+            title = { Text("Replace everything with this backup?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "${summary.entryCount} transactions, ${summary.categoryCount} categories, " +
+                            "${summary.ruleCount} merchant rules." +
+                            (range?.let { "\n$it." } ?: ""),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text("Balance in the backup: ${Money.formatMinor(summary.balanceMinor)} EGP",
+                        style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Your ${data.entries.size} current transactions will be replaced. Your " +
+                            "passcode stays as it is. This cannot be undone.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    LedgerRepository.importBackup(file.data)
+                    status = "Restored ${summary.entryCount} transactions."
+                    pending = null
+                }) { Text("Restore") }
+            },
+            dismissButton = { TextButton(onClick = { pending = null }) { Text("Cancel") } },
+        )
+    }
+
+    failure?.let { reason ->
+        AlertDialog(
+            onDismissRequest = { failure = null },
+            title = { Text("Cannot restore that file") },
+            text = { Text(reason) },
+            confirmButton = { TextButton(onClick = { failure = null }) { Text("OK") } },
+        )
     }
 }
 

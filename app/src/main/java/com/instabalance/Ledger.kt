@@ -465,6 +465,16 @@ object LedgerRepository {
     }
 
     /**
+     * Replaces the ledger with the contents of a backup file, keeping this device's own app lock.
+     * Runs the same migration a file read from disk gets, so a backup written by an older build
+     * lands in the shape the current one expects rather than one step behind it.
+     */
+    fun importBackup(imported: LedgerData) = mutate { current ->
+        val merged = Backup.forImport(current, imported)
+        Migration.apply(merged) ?: merged
+    }
+
+    /**
      * Replaces the ledger with generated sample data. Only ever called from a debug build: it
      * destroys whatever is there, which is the point on a machine that has nothing worth keeping.
      */
