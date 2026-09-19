@@ -88,6 +88,12 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.biometric:biometric:1.1.0")
+    // biometric 1.1.0 drags in fragment 1.2.5, whose FragmentActivity still enforces the legacy
+    // "lower 16 bits only" rule on request codes. ActivityResultRegistry in activity 1.9.x
+    // deliberately allocates above that range, so on a FragmentActivity every launcher (the
+    // notification permission, the backup file picker) threw IllegalArgumentException the moment
+    // it was tapped. Fragment 1.3.0 dropped the check; this pins a current one.
+    implementation("androidx.fragment:fragment:1.8.5")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     testImplementation("junit:junit:4.13.2")
