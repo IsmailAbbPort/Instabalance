@@ -26,10 +26,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,7 +61,7 @@ internal fun HomeScreen(onSettings: () -> Unit, onInbox: () -> Unit) {
             .navigationBarsPadding()
     ) {
         BrandHeader(
-            greeting = greetingForHour(),
+            greeting = rememberGreeting(),
             title = "Fuck Instapay",
             onSettings = onSettings,
         )
@@ -214,14 +218,37 @@ private fun BalanceCard(balanceMinor: Long, lastAnchor: Long?, modifier: Modifie
     }
 }
 
-/** Matches InstaPay's time-of-day greeting above the name. */
-private fun greetingForHour(): String {
-    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-    return when (hour) {
-        in 5..11 -> "Good Morning"
-        in 12..16 -> "Good Afternoon"
-        else -> "Good Evening"
+/**
+ * Matches InstaPay's time-of-day greeting above the name. Pure and hour-driven so the boundaries
+ * can be tested without waiting for the afternoon.
+ */
+internal fun greetingForHour(hour: Int): String = when (hour) {
+    in 5..11 -> "Good Morning"
+    in 12..16 -> "Good Afternoon"
+    else -> "Good Evening"
+}
+
+/**
+ * Re-reads the clock every time the app comes back to the foreground. Calling the clock once
+ * during composition left the greeting frozen at whatever it said when the screen was first drawn,
+ * so an app opened before five and resumed at nine still said Good Evening.
+ */
+@Composable
+private fun rememberGreeting(): String {
+    fun now() = greetingForHour(
+        java.time.LocalTime.now().hour
+    )
+
+    var greeting by remember { mutableStateOf(now()) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) greeting = now()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+    return greeting
 }
 
 private fun syncedAgoText(lastAnchor: Long?): String {
