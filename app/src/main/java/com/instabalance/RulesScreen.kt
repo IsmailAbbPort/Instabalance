@@ -231,6 +231,14 @@ private fun RuleEditSheet(rule: MerchantRule?, data: LedgerData, onDismiss: () -
         ).second
     }
 
+    // Entries this rule filed itself, which would otherwise keep pointing at the old category and
+    // quietly disagree with the rule that put them there. Hand-filed entries are never counted.
+    val alreadyFiled = remember(rule?.id, categoryId, data.entries) {
+        if (rule == null || categoryId == rule.categoryId) 0
+        else MerchantRules.ruleOwnedCount(data.entries, rule)
+    }
+    var moveExisting by remember(rule?.id) { mutableStateOf(true) }
+
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             Modifier
@@ -278,6 +286,25 @@ private fun RuleEditSheet(rule: MerchantRule?, data: LedgerData, onDismiss: () -
                 }
             }
 
+            if (alreadyFiled > 0) {
+                Spacer(Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Move $alreadyFiled transaction" +
+                                (if (alreadyFiled == 1) "" else "s") + " this rule already filed",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            "Off means they keep the old category and stop matching this rule.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = moveExisting, onCheckedChange = { moveExisting = it })
+                }
+            }
+
             if (wouldMatch > 0) {
                 Spacer(Modifier.height(16.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -306,6 +333,11 @@ private fun RuleEditSheet(rule: MerchantRule?, data: LedgerData, onDismiss: () -
                         if (rule == null) {
                             LedgerRepository.addRule(normalised, id, System.currentTimeMillis())
                         } else {
+                            // Move the entries this rule filed BEFORE changing it, while they can
+                            // still be identified by the category the old rule put them in.
+                            if (alreadyFiled > 0 && moveExisting) {
+                                LedgerRepository.recategoriseRuleOwned(rule, id)
+                            }
                             LedgerRepository.updateRule(rule.id, normalised, id)
                         }
                         if (alsoApply) {

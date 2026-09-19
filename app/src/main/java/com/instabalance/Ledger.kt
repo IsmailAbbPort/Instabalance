@@ -399,11 +399,17 @@ object LedgerRepository {
 
     fun deleteCategory(id: String) = mutate { Categories.delete(it, id) }
 
-    fun addRule(pattern: String, categoryId: String, now: Long) = mutate {
+    /**
+     * Returns the rule it created, or null when the pattern normalises to nothing. Callers need the
+     * rule itself: reaching for `merchantRules.last()` afterwards throws on the first rule and picks
+     * an unrelated one after that, because this can legitimately add nothing.
+     */
+    fun addRule(pattern: String, categoryId: String, now: Long): MerchantRule? {
         val clean = MerchantRules.normalise(pattern)
-        if (clean.isEmpty()) it
-        else it.copy(merchantRules = it.merchantRules +
-            MerchantRule(pattern = clean, categoryId = categoryId, createdAt = now))
+        if (clean.isEmpty()) return null
+        val rule = MerchantRule(pattern = clean, categoryId = categoryId, createdAt = now)
+        mutate { it.copy(merchantRules = it.merchantRules + rule) }
+        return rule
     }
 
     fun updateRule(id: String, pattern: String, categoryId: String) = mutate { d ->
@@ -414,6 +420,33 @@ object LedgerRepository {
 
     fun deleteRule(id: String) = mutate { d ->
         d.copy(merchantRules = d.merchantRules.filterNot { it.id == id })
+    }
+
+    /**
+     * Moves the entries [rule] filed itself to [categoryId], leaving hand-filed ones alone. Without
+     * this, changing a rule's category leaves everything it previously filed pointing at the old
+     * one, disagreeing with the rule that put them there. Opt-in and counted in the UI first.
+     */
+    fun recategoriseRuleOwned(rule: MerchantRule, categoryId: String): Int {
+        var moved = 0
+        synchronized(lock) {
+            val next = _data.value.entries.map { e ->
+                val ownedByRule = e.categoryFromRule && e.categoryId == rule.categoryId &&
+                    MerchantRules.match(listOf(rule), e.merchant) != null
+                if (ownedByRule) {
+                    moved++
+                    e.copy(categoryId = categoryId, categoryFromRule = true)
+                } else {
+                    e
+                }
+            }
+            if (moved > 0) {
+                val d = _data.value.copy(entries = next)
+                _data.value = d
+                persist(d)
+            }
+        }
+        return moved
     }
 
     /** Opt-in and counted in the UI first; a rule never rewrites history on its own. */

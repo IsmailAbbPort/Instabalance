@@ -198,12 +198,28 @@ private fun BudgetSetting(data: LedgerData) {
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             )
+            // sanitizeAmount permits a lone ".", which parses to null. Treating null as "no budget"
+            // would silently delete the budget and its milestone state when the user meant to set
+            // one, so only a genuinely blank field turns it off.
+            val blank = amount.isBlank()
+            val parsed = if (blank) null else Money.parseToMinor(amount)
+            val usable = blank || parsed != null
+
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = {
-                    val minor = if (amount.isBlank()) null else Money.parseToMinor(amount)
-                    LedgerRepository.setBudget(minor)
-                    if (minor != null && !notificationsOn) askForNotifications()
-                }) { Text("Save budget") }
+                TextButton(
+                    enabled = usable,
+                    onClick = {
+                        LedgerRepository.setBudget(parsed)
+                        if (parsed != null && !notificationsOn) askForNotifications()
+                    },
+                ) { Text(if (blank) "Turn off budget" else "Save budget") }
+            }
+            if (!usable) {
+                Text(
+                    "That is not an amount. Enter a number, or clear the field to turn the budget off.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
 
             // A budget with notifications off is silently useless. Say so, and give the way back:
@@ -334,7 +350,7 @@ private fun SettingsPanel(data: LedgerData) {
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
             TextButton(onClick = {
-                val bps = ((pct.toDoubleOrNull() ?: 0.0) * 100).toInt()
+                val bps = Money.percentToBasisPoints(pct) ?: 0
                 val minMinor = Money.parseToMinor(minv) ?: 0L
                 val capMinor = if (capv.isBlank()) null else Money.parseToMinor(capv)
                 LedgerRepository.setFeeConfig(true, bps, minMinor, capMinor)

@@ -72,11 +72,13 @@ internal fun InboxScreen(onBack: () -> Unit) {
 
         var extra = 0
         if (learnPattern != null) {
-            LedgerRepository.addRule(learnPattern, categoryId, System.currentTimeMillis())
-            val rule = LedgerRepository.data.value.merchantRules.last()
-            extra = MerchantRules.applyToUncategorised(
-                LedgerRepository.data.value.entries, rule
-            ).second
+            // addRule returns the rule because it can legitimately add nothing (a pattern that
+            // normalises away), and because reaching for the last rule afterwards is wrong either
+            // way. applyRuleToUncategorised is the one that WRITES; the pure applyToUncategorised
+            // only computes, so calling that here counted matches and saved none of them.
+            LedgerRepository.addRule(learnPattern, categoryId, System.currentTimeMillis())?.let {
+                extra = LedgerRepository.applyRuleToUncategorised(it)
+            }
         }
 
         scope.launch {
@@ -153,13 +155,25 @@ internal fun InboxScreen(onBack: () -> Unit) {
                                     val zone = ZoneId.systemDefault()
                                     val startOfToday = Instant.now().atZone(zone)
                                         .toLocalDate().atStartOfDay(zone).toInstant().toEpochMilli()
-                                    val older = pending
-                                        .filter { it.timestamp < startOfToday }
-                                        .map { it.id }
-                                        .toSet()
-                                    val previous = LedgerRepository.setCategory(
-                                        older, Categories.OTHER_EXPENSE
-                                    )
+                                    val older = pending.filter { it.timestamp < startOfToday }
+                                    // Income and expenses have their own "Other", so a bulk file
+                                    // has to split by direction. Filing a salary under an expense
+                                    // category would put it in the spending ring.
+                                    val expenses = older.filter { it.type == EntryType.DEBIT }
+                                        .map { it.id }.toSet()
+                                    val income = older.filter { it.type == EntryType.CREDIT }
+                                        .map { it.id }.toSet()
+
+                                    val previous = buildMap {
+                                        if (expenses.isNotEmpty()) {
+                                            putAll(LedgerRepository.setCategory(
+                                                expenses, Categories.OTHER_EXPENSE))
+                                        }
+                                        if (income.isNotEmpty()) {
+                                            putAll(LedgerRepository.setCategory(
+                                                income, Categories.OTHER_INCOME))
+                                        }
+                                    }
                                     scope.launch {
                                         if (snackbar.showSnackbar(
                                                 "Filed ${older.size} as Other", actionLabel = "Undo"

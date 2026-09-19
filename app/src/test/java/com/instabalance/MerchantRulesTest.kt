@@ -27,6 +27,13 @@ class MerchantRulesTest {
         assertEquals("ISMAILABB@INSTAPAY", MerchantRules.normalise("ismailabb@instapay"))
     }
 
+    @Test fun aPatternOfOnlyPunctuationNormalisesToNothing() {
+        // Which is why addRule returns the rule it made rather than nothing: it can legitimately
+        // add none, and callers that reached for merchantRules.last() afterwards threw.
+        assertEquals("", MerchantRules.normalise("!!!"))
+        assertEquals("", MerchantRules.normalise("   "))
+    }
+
     @Test fun normaliseConvertsArabicIndicDigits() {
         // A merchant string can carry a branch number in Arabic-Indic digits.
         assertEquals("STORE 123", MerchantRules.normalise("store ١٢٣"))

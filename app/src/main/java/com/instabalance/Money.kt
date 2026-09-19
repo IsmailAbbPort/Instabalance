@@ -25,6 +25,17 @@ object Money {
      * 123450 -> "1.2k". For chart axes, where the full "1,234.50" is wider than the space and the
      * reader only needs the order of magnitude. Never used for a figure someone might act on.
      */
+    /**
+     * "0.29" -> 29 basis points, or null if it is not a percentage. Rounded rather than truncated:
+     * 0.29 * 100 is 28.999999 in binary floating point, so a plain toInt() silently stores the fee
+     * as 0.28%, and every send is then charged slightly wrong forever.
+     */
+    fun percentToBasisPoints(raw: String): Int? {
+        val v = raw.trim().toDoubleOrNull() ?: return null
+        if (v < 0) return null
+        return Math.round(v * 100).toInt()
+    }
+
     fun formatCompactMinor(minor: Long): String {
         val pounds = kotlin.math.abs(minor) / 100
         val sign = if (minor < 0) "-" else ""

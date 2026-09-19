@@ -6,6 +6,33 @@ import org.junit.Test
 
 class MoneyTest {
 
+    // ---- Fee percentage. Every send is charged with this, so a rounding slip is permanent ----
+
+    @Test fun percentRoundsRatherThanTruncating() {
+        // 0.29 * 100 is 28.999999 in binary floating point. toInt() would store 0.28%.
+        assertEquals(29, Money.percentToBasisPoints("0.29"))
+        assertEquals(10, Money.percentToBasisPoints("0.1"))
+        assertEquals(250, Money.percentToBasisPoints("2.5"))
+        assertEquals(0, Money.percentToBasisPoints("0"))
+    }
+
+    @Test fun percentRejectsNonsenseRatherThanReadingItAsZero() {
+        assertNull(Money.percentToBasisPoints(""))
+        assertNull(Money.percentToBasisPoints("."))
+        assertNull(Money.percentToBasisPoints("abc"))
+        assertNull(Money.percentToBasisPoints("-1"))
+    }
+
+    // ---- A lone "." passes the amount field's filter, so it has to parse to null ----
+
+    @Test fun aLoneDotIsNotAnAmount() {
+        // sanitizeAmount permits it, and the budget screen treated a null parse as "no budget",
+        // which silently deleted the budget when the user meant to set one.
+        assertNull(Money.parseToMinor("."))
+        assertNull(Money.parseToMinor(""))
+        assertNull(Money.parseToMinor("   "))
+    }
+
     // ---- Compact form, used only on chart axes where the full figure will not fit ----
 
     @Test fun compactShowsWholePoundsUnderAThousand() {

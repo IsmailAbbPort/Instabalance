@@ -116,15 +116,17 @@ internal fun InsightsSection(data: LedgerData) {
             if (slices.isEmpty() || total == 0L) {
                 EmptyChart(if (showIncome) "No income in this period yet" else "No expenses in this period yet")
             } else {
+                // getOrNull, not slices[selected]: the selection survives ledger changes, so
+                // filing the last uncategorised entry while its legend row is selected shrinks
+                // the list under a now out-of-range index.
+                val pickedSlice = slices.getOrNull(selected)
                 DonutChart(
                     slices = slices,
                     colourOf = ::colourOf,
                     selectedIndex = selected,
                     onSelect = { selected = if (it == selected) -1 else it },
-                    centreLabel = if (selected >= 0) nameOf(slices[selected]) else "total",
-                    centreValue = Money.formatMinor(
-                        if (selected >= 0) slices[selected].amountMinor else total
-                    ),
+                    centreLabel = pickedSlice?.let { nameOf(it) } ?: "total",
+                    centreValue = Money.formatMinor(pickedSlice?.amountMinor ?: total),
                 )
                 Spacer(Modifier.height(16.dp))
                 ChartLegend(slices, ::nameOf, ::colourOf, selected) {
@@ -135,8 +137,17 @@ internal fun InsightsSection(data: LedgerData) {
 
         InsightCard("Over time") {
             val buckets = remember(data, type, period) {
-                if (period == Period.MONTHS_6) Insights.monthly(data.entries, type, 6, now, zone)
-                else Insights.daily(data.entries, type, 30, now, zone)
+                when (period) {
+                    Period.MONTHS_6 -> Insights.monthly(data.entries, type, 6, now, zone)
+                    // Month to date, matching the donut above it. Drawing a rolling 30 days here
+                    // while the ring showed this month made the two disagree on the same card.
+                    Period.MONTH ->
+                        Insights.daily(
+                            data.entries, type,
+                            now.atZone(zone).toLocalDate().dayOfMonth, now, zone,
+                        )
+                    Period.DAYS_30 -> Insights.daily(data.entries, type, 30, now, zone)
+                }
             }
             if (buckets.all { it.amountMinor == 0L }) {
                 EmptyChart("Nothing in this period yet")
