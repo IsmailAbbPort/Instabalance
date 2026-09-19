@@ -63,6 +63,7 @@ internal fun SettingsScreen(
     onBack: () -> Unit,
     onCategories: () -> Unit,
     onRules: () -> Unit,
+    onSmsSetup: () -> Unit,
 ) {
     val data by LedgerRepository.data.collectAsStateWithLifecycle()
 
@@ -92,8 +93,19 @@ internal fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             BudgetSetting(data)
+            NavRow(
+                "Reading your bank's SMS",
+                if (data.smsConfig == SmsConfig()) "Set up for Egyptian banks. Tap if yours differs."
+                else "Customised for your bank",
+                onSmsSetup,
+            )
             NavRow("Categories", "${data.categories.count { !it.hidden }} in use", onCategories)
-            NavRow("Merchant rules", "${data.merchantRules.size} saved", onRules)
+            NavRow(
+                "Merchant rules",
+                if (data.merchantRules.isEmpty()) "File a shop's transactions automatically"
+                else "${data.merchantRules.size} saved",
+                onRules,
+            )
             SettingsPanel(data)
             if (BuildConfig.DEBUG) DeveloperTools()
         }

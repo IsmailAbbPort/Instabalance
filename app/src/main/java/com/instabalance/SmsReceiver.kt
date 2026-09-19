@@ -26,24 +26,30 @@ class SmsReceiver : BroadcastReceiver() {
         }
 
         val now = System.currentTimeMillis()
+        val config = data.smsConfig
         for ((sender, sb) in bySender) {
             val body = sb.toString().trim()
             if (body.isEmpty()) continue
 
-            // Learning mode only records money-looking SMS, not every personal text you receive.
-            if (data.learningMode && looksFinancial(body)) {
+            // Learning mode records regardless of the sender allowlist: you need to SEE a sender's
+            // messages before you can decide to allow it, and an allowlist that hides the thing you
+            // are trying to configure is a trap.
+            if (data.learningMode && looksFinancial(body, config)) {
                 LedgerRepository.addCapture("SMS", sender, body, now)
             }
 
-            val parsed = BalanceParser.parse(body) ?: continue
+            if (!config.acceptsSender(sender)) continue
+            val parsed = BalanceParser.parse(body, config) ?: continue
             LedgerRepository.addAuto(parsed, Source.SMS, "[$sender] $body", now)
         }
     }
 
     /** A cheap gate so we don't capture unrelated personal SMS in Learning mode. */
-    private fun looksFinancial(body: String): Boolean {
+    private fun looksFinancial(body: String, config: SmsConfig): Boolean {
         val low = body.lowercase()
-        return body.contains("ج") || low.contains("egp") || low.contains("le ") ||
-            low.contains("account") || body.contains("حساب") || body.contains("رصيد")
+        return config.currencyWords.any { it.isNotBlank() && low.contains(it.lowercase()) } ||
+            config.creditWords.any { it.isNotBlank() && low.contains(it.lowercase()) } ||
+            config.debitWords.any { it.isNotBlank() && low.contains(it.lowercase()) } ||
+            config.balanceLabels.any { it.isNotBlank() && low.contains(it.lowercase()) }
     }
 }

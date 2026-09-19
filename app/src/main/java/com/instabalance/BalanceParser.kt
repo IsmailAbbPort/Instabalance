@@ -1,128 +1,146 @@
 package com.instabalance
 
 /**
- * Turns an EGBANK SMS or an InstaPay notification into a transaction, or null if it isn't one.
+ * Turns a bank SMS or a payment notification into a transaction, or null if it isn't one.
  *
- * Real EGBANK formats this handles (from live messages):
+ * Every word this keys on comes from [SmsConfig], whose defaults are EGBANK's wording. That is the
+ * whole point: the shapes below are common to bank SMS everywhere (a direction word, an amount
+ * next to a currency, a remaining balance that must not be mistaken for the amount, a counterparty
+ * after "from"), while the exact words are not. Someone on another bank can read their own messages
+ * and fill in their own words, rather than needing this file edited.
+ *
+ * Real EGBANK formats the defaults handle:
  *   AR debit:    "تم سحب 100جم من حساب 0057*100 من ATM  الرصيد المتاح 2091.36جم"
  *   AR debit:    "تم الشراء بمبلغ 165جم على الكارت رقم +++0954 من PAYMOB ..."
  *   AR reversal: "تم الغاء الشراء بمبلغ 23.8جم على الكارت رقم +++0954 من ..."   (money back -> credit)
- *   AR reversal: "تم إلغاء خصم مبلغ 100جم من ATM على حساب رقم 0057*100"          (money back -> credit)
  *   EN debit:    "Your account was charged by EGP 1105 on 21-07 14:04 IPN REF# ..."
- *   EN credit:   "Your account was credited by EGP 100 on 22-07 22:51 IPN REF# ..."
- *
- * InstaPay notification wording is not confirmed yet, so the English branch below is a best-effort
- * guess (received/sent/credited/charged). Use Learning mode to capture the real text, then tighten.
+ *   EN credit:   "Your account was credited by EGP 100 on 22-07 22:51 IPN REF# ... from NAME"
  */
 object BalanceParser {
 
-    // "EGP 1105" or "100 EGP" (either order).
-    private val englishAmount = Regex(
-        """egp\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)|([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*egp""",
-        RegexOption.IGNORE_CASE
-    )
+    private const val NUMBER = """[0-9][0-9,]*(?:\.[0-9]{1,2})?"""
 
-    // Amount stated after مبلغ / بمبلغ, e.g. "بمبلغ 23.8جم".
-    private val arabicAmountLabelled = Regex("""(?:بمبلغ|مبلغ)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)""")
-    // Any "<number> ج" (covers جم / ج.م). Used only after the balance clause is stripped out.
-    private val arabicAmountBeforeCurrency = Regex("""([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*ج""")
-    // The available-balance clause, e.g. "الرصيد المتاح 2091.36جم". Must NOT be read as the amount.
-    private val arabicBalanceClause = Regex("""الرصيد\s*المتاح\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*ج""")
-
-    // ---- Merchant / counterparty extraction -------------------------------
-    // Only some messages carry one. A card purchase names the shop; an InstaPay send (IPN REF#)
-    // names nobody at all, which is why roughly half of debits can never be auto-categorised.
-
-    /** "على الكارت رقم +++0954 من PAYMOB RAF SPECIALIT CAIRO" -> the shop. */
-    private val arabicCardMerchant = Regex("""الكارت\s*رقم\s*[+*0-9]+\s*من\s+(.+)$""")
-    /**
-     * "من ATM" on a withdrawal. Every "من X" is considered and the last wins, because the message
-     * says "from account 0057*100 from ATM" and the ATM is the part worth learning. It cannot be
-     * anchored to the end of the string: stripping the balance clause stops at "ج" and leaves the
-     * "م" of "جم" behind.
-     */
-    private val arabicFromToken = Regex("""من\s+([^\s]+)""")
-
-    /** Structural words that follow "من" without naming anybody. */
-    private val arabicStructural = setOf("حساب", "الكارت", "رقم")
-    /** "was credited by EGP 100 ... from NANICE AHMED for details ..." */
-    private val englishFrom = Regex("""\bfrom\s+(.+?)(?:\s+for\s+details\b|\s+IPN\b|$)""", RegexOption.IGNORE_CASE)
-    /** An InstaPay address, e.g. "to naniiceeabbas@instapay". */
-    private val instapayAddress = Regex("""\b(?:from|to)\s+(\S+@\S+)""", RegexOption.IGNORE_CASE)
-
-    fun parse(rawText: String): ParsedTxn? {
+    fun parse(rawText: String, config: SmsConfig = SmsConfig()): ParsedTxn? {
         if (rawText.isBlank()) return null
-        val t = normalizeArabicDigits(rawText)
-        val low = t.lowercase()
+        val text = normalizeArabicDigits(rawText)
+        val low = text.lowercase()
 
-        // ---- English (EGBANK IPN + likely InstaPay) ----
-        val engCredit = low.contains("credited") || low.contains("received")
-        val engDebit = low.contains("charged") || low.contains("debited") ||
-            low.contains("sent") || low.contains("paid")
-        if (engCredit != engDebit) {
-            val minor = firstEnglishAmount(t) ?: return null
-            if (minor <= 0) return null
-            return ParsedTxn(
-                if (engCredit) EntryType.CREDIT else EntryType.DEBIT,
-                minor,
-                englishMerchant(t),
-            )
-        }
+        // An OTP contains a number and often the word "account". Gate it out first, because
+        // recording a verification code as a transaction is both wrong and alarming.
+        if (config.ignoreWords.any { it.isNotBlank() && low.contains(it.lowercase()) }) return null
 
-        // ---- Arabic (EGBANK) ----
-        val hasCancel = t.contains("الغاء") || t.contains("إلغاء")
-        val isPurchase = t.contains("شراء")
-        val isWithdraw = t.contains("سحب")
-        val isDeduction = t.contains("خصم")
-        val isDeposit = t.contains("ايداع") || t.contains("إيداع") ||
-            t.contains("اضافة") || t.contains("إضافة")
+        val type = direction(low, text, config) ?: return null
 
-        val type = when {
-            // A cancelled purchase/withdrawal/deduction returns money -> credit.
-            hasCancel && (isPurchase || isWithdraw || isDeduction) -> EntryType.CREDIT
-            isDeposit -> EntryType.CREDIT
-            isPurchase || isWithdraw || isDeduction -> EntryType.DEBIT
-            else -> return null
-        }
+        // Strip "available balance 2091.36 EGP" BEFORE looking for the amount. Without this the
+        // parser reads your remaining balance as the size of the purchase.
+        val withoutBalance = stripBalanceClauses(text, config)
 
-        val withoutBalance = t.replace(arabicBalanceClause, " ")
-        val amountStr = arabicAmountLabelled.find(withoutBalance)?.groupValues?.get(1)
-            ?: arabicAmountBeforeCurrency.find(withoutBalance)?.groupValues?.get(1)
-            ?: return null
-        val minor = Money.parseToMinor(amountStr) ?: return null
+        val minor = findAmount(withoutBalance, config) ?: return null
         if (minor <= 0) return null
-        return ParsedTxn(type, minor, arabicMerchant(t, withoutBalance))
-    }
 
-    private fun firstEnglishAmount(text: String): Long? {
-        val m = englishAmount.find(text) ?: return null
-        val raw = m.groupValues[1].ifEmpty { m.groupValues[2] }
-        return Money.parseToMinor(raw)
+        return ParsedTxn(type, minor, findMerchant(text, withoutBalance, config))
     }
 
     /**
-     * An InstaPay address if there is one, else a plain "from NAME". A send seen only as an EGBANK
-     * IPN SMS has neither, and returns null: there is genuinely nothing in the text to learn from.
+     * Credit or debit, with reversals flipping the sign: a cancelled purchase is money coming back.
+     * Null when the message says both or neither, because guessing the direction of money is worse
+     * than not recording it.
      */
-    private fun englishMerchant(text: String): String? =
-        clean(instapayAddress.find(text)?.groupValues?.get(1))
-            ?: clean(englishFrom.find(text)?.groupValues?.get(1))
+    private fun direction(low: String, text: String, config: SmsConfig): EntryType? {
+        fun mentions(words: List<String>) = words.any { w ->
+            w.isNotBlank() && (low.contains(w.lowercase()) || text.contains(w))
+        }
 
-    /** The shop on a card purchase, else the "من X" token (typically ATM) on a withdrawal. */
-    private fun arabicMerchant(full: String, withoutBalance: String): String? =
-        clean(arabicCardMerchant.find(full)?.groupValues?.get(1))
-            ?: clean(
-                arabicFromToken.findAll(withoutBalance)
-                    .map { it.groupValues[1] }
-                    .filterNot { it in arabicStructural }
-                    .lastOrNull()
+        val credit = mentions(config.creditWords)
+        val debit = mentions(config.debitWords)
+        if (credit == debit) return null
+
+        val reversed = mentions(config.reversalWords)
+        val base = if (credit) EntryType.CREDIT else EntryType.DEBIT
+        return if (!reversed) base else when (base) {
+            EntryType.CREDIT -> EntryType.DEBIT
+            else -> EntryType.CREDIT
+        }
+    }
+
+    private fun stripBalanceClauses(text: String, config: SmsConfig): String {
+        var out = text
+        val currency = currencyAlternation(config)
+        config.balanceLabels.filter { it.isNotBlank() }.forEach { label ->
+            val re = Regex(
+                """${Regex.escape(label)}\s*:?\s*(?:$currency)?\s*$NUMBER\s*(?:$currency)?""",
+                RegexOption.IGNORE_CASE,
             )
+            out = out.replace(re, " ")
+        }
+        return out
+    }
 
     /**
-     * Collapses whitespace and drops anything too short to be a name. Merchant extraction is a
-     * convenience: it must never be able to fail a transaction, so every path here returns null
-     * rather than throwing.
+     * A labelled amount ("by EGP 100", "بمبلغ 165") wins over a bare number beside a currency,
+     * because a message often carries both a card number and a date that a looser match would grab.
      */
+    private fun findAmount(text: String, config: SmsConfig): Long? {
+        val currency = currencyAlternation(config)
+
+        config.amountLabels.filter { it.isNotBlank() }.forEach { label ->
+            val re = Regex(
+                """${Regex.escape(label)}\s*:?\s*(?:$currency)?\s*($NUMBER)""",
+                RegexOption.IGNORE_CASE,
+            )
+            re.find(text)?.let { return Money.parseToMinor(it.groupValues[1]) }
+        }
+
+        if (currency.isNotEmpty()) {
+            // Currency on either side: "EGP 100" and "100 EGP" are both common.
+            Regex("""(?:$currency)\s*($NUMBER)""", RegexOption.IGNORE_CASE).find(text)
+                ?.let { return Money.parseToMinor(it.groupValues[1]) }
+            Regex("""($NUMBER)\s*(?:$currency)""", RegexOption.IGNORE_CASE).find(text)
+                ?.let { return Money.parseToMinor(it.groupValues[1]) }
+        }
+        return null
+    }
+
+    /** Words that follow a merchant label without naming anybody. */
+    private val structural = setOf("حساب", "الكارت", "رقم", "account", "card", "no", "ref")
+
+    /**
+     * The other party, where the message names one. Card purchases do; an InstaPay transfer seen as
+     * a bank SMS does not, and that is a fact about the message rather than a gap here.
+     *
+     * Never able to fail a transaction: the amount and direction are the money, this is a
+     * convenience for the category rules.
+     */
+    private fun findMerchant(full: String, withoutBalance: String, config: SmsConfig): String? {
+        // An address wins outright: it is unambiguous and it is the whole counterparty.
+        Regex("""\b(?:from|to)\s+(\S+@\S+)""", RegexOption.IGNORE_CASE).find(full)
+            ?.let { return clean(it.groupValues[1]) }
+
+        // A card purchase names the shop as the rest of the line after the card number.
+        Regex("""(?:الكارت|card)\s*(?:رقم|no\.?|#)?\s*[+*x0-9]+\s*(?:من|from|at)\s+(.+)$""",
+            RegexOption.IGNORE_CASE).find(full)
+            ?.let { return clean(it.groupValues[1]) }
+
+        Regex("""\bfrom\s+(.+?)(?:\s+for\s+details\b|\s+IPN\b|$)""", RegexOption.IGNORE_CASE)
+            .find(full)?.let { m -> clean(m.groupValues[1])?.let { return it } }
+
+        // Otherwise the last "from X" that names something, which is what turns an ATM withdrawal
+        // into one rule covering every cash withdrawal.
+        config.merchantLabels.filter { it.isNotBlank() }.forEach { label ->
+            val candidates = Regex("""${Regex.escape(label)}\s+([^\s]+)""", RegexOption.IGNORE_CASE)
+                .findAll(withoutBalance)
+                .map { it.groupValues[1] }
+                .filterNot { it.lowercase() in structural || it in structural }
+                .toList()
+            candidates.lastOrNull()?.let { clean(it)?.let { c -> return c } }
+        }
+        return null
+    }
+
+    private fun currencyAlternation(config: SmsConfig): String =
+        config.currencyWords.filter { it.isNotBlank() }.joinToString("|") { Regex.escape(it) }
+
+    /** Collapses whitespace and drops anything too short to be a name. */
     private fun clean(raw: String?): String? {
         val s = raw?.replace(Regex("""\s+"""), " ")?.trim()?.trimEnd('.', ',', '-') ?: return null
         return s.takeIf { it.length >= 2 }

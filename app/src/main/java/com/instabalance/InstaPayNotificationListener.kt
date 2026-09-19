@@ -36,7 +36,7 @@ class InstaPayNotificationListener : NotificationListenerService() {
             LedgerRepository.addCapture("NOTIFICATION", pkg, body, now)
         }
 
-        val parsed = BalanceParser.parse(body) ?: return
+        val parsed = BalanceParser.parse(body, data.smsConfig) ?: return
         LedgerRepository.addAuto(parsed, Source.NOTIFICATION, body, now)
     }
 }

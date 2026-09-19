@@ -72,9 +72,11 @@ private fun Gate() {
                 onBack = { nav.back() },
                 onCategories = { nav.go(Route.CATEGORIES) },
                 onRules = { nav.go(Route.RULES) },
+                onSmsSetup = { nav.go(Route.SMS_SETUP) },
             )
             Route.CATEGORIES -> CategoriesScreen(onBack = { nav.back() })
             Route.RULES -> RulesScreen(onBack = { nav.back() })
+            Route.SMS_SETUP -> SmsSetupScreen(onBack = { nav.back() })
         }
     } else {
         LockScreen(activity, data.biometricEnabled) { LedgerRepository.markUnlocked() }

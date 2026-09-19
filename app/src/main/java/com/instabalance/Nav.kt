@@ -11,7 +11,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
  * Screens. Sheets (entry detail, the category picker) deliberately are NOT routes: they close with
  * a dismiss and must never be somewhere the back stack can strand you.
  */
-internal enum class Route { HOME, INBOX, SETTINGS, CATEGORIES, RULES }
+internal enum class Route { HOME, INBOX, SETTINGS, CATEGORIES, RULES, SMS_SETUP }
 
 /**
  * A back stack small enough not to justify a navigation library, which would be the single

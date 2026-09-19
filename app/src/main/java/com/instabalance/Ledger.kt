@@ -65,6 +65,7 @@ data class LedgerData(
     val feeCapMinor: Long? = 2000,      // 20 EGP cap on the InstaPay send fee
     val categories: List<Category> = Categories.PRESETS,
     val merchantRules: List<MerchantRule> = emptyList(),
+    val smsConfig: SmsConfig = SmsConfig(),
     val monthlyBudgetMinor: Long? = null,   // null = no budget, no alerts
     val budgetMonth: String = "",           // "2026-09": the month highestMilestoneFired belongs to
     val highestMilestoneFired: Int = 0,     // 0, 25, 50, 75, 90, 100 or 120
@@ -467,6 +468,8 @@ object LedgerRepository {
         _data.value = next
         persist(next)
     }
+
+    fun setSmsConfig(config: SmsConfig) = mutate { it.copy(smsConfig = config) }
 
     fun setWatchedPackages(packages: List<String>) = synchronized(lock) {
         val next = _data.value.copy(watchedPackages = packages.map { it.trim() }.filter { it.isNotEmpty() })

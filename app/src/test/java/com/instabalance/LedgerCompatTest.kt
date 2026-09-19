@@ -89,7 +89,10 @@ class LedgerCompatTest {
 
         val added = encoded.keys - v1Keys
         assertEquals(
-            setOf("categories", "merchantRules", "monthlyBudgetMinor", "budgetMonth", "highestMilestoneFired"),
+            setOf(
+                "categories", "merchantRules", "smsConfig",
+                "monthlyBudgetMinor", "budgetMonth", "highestMilestoneFired",
+            ),
             added,
         )
         // Nothing was removed either, or an old file would fail to supply a required field.
