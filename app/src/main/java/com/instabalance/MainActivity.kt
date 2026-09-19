@@ -66,8 +66,10 @@ private fun Gate() {
             Route.HOME -> HomeScreen(
                 onSettings = { nav.go(Route.SETTINGS) },
                 onInbox = { nav.go(Route.INBOX) },
+                onAllTransactions = { nav.go(Route.TRANSACTIONS) },
             )
             Route.INBOX -> InboxScreen(onBack = { nav.back() })
+            Route.TRANSACTIONS -> TransactionsScreen(onBack = { nav.back() })
             Route.SETTINGS -> SettingsScreen(
                 onBack = { nav.back() },
                 onCategories = { nav.go(Route.CATEGORIES) },

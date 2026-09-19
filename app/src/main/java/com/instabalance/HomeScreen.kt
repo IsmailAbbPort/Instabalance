@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -43,7 +44,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
-internal fun HomeScreen(onSettings: () -> Unit, onInbox: () -> Unit) {
+internal fun HomeScreen(onSettings: () -> Unit, onInbox: () -> Unit, onAllTransactions: () -> Unit) {
     val data by LedgerRepository.data.collectAsStateWithLifecycle()
     var dialog by remember { mutableStateOf(Dialog.NONE) }
     var detail by remember { mutableStateOf<Entry?>(null) }
@@ -115,7 +116,18 @@ internal fun HomeScreen(onSettings: () -> Unit, onInbox: () -> Unit) {
             InboxBanner(pending, onInbox)
             budget?.let { BudgetCard(it) }
 
-            Text("Recent activity", style = MaterialTheme.typography.titleMedium)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Recent activity", style = MaterialTheme.typography.titleMedium)
+                // Only once there is more than this list shows: a "View all" that leads to the
+                // same eight rows is a dead end.
+                if (data.entries.size > 8) {
+                    TextButton(onClick = onAllTransactions) { Text("View all") }
+                }
+            }
             if (data.entries.isEmpty()) {
                 Text("Nothing yet. Add a transaction or set your balance.",
                     style = MaterialTheme.typography.bodyMedium)
@@ -278,70 +290,3 @@ private fun EntryList(entries: List<Entry>, data: LedgerData, onOpen: (Entry) ->
     }
 }
 
-/**
- * Laid out like InstaPay's own transaction row: the amount leads at the left, the status sits at
- * the right, and the counterparty, category and date sit underneath.
- */
-@Composable
-private fun EntryRow(e: Entry, data: LedgerData, onOpen: (Entry) -> Unit) {
-    val brand = LocalBrand.current
-    val category = Categories.byId(data.categories, e.categoryId)
-    val sign = when (e.type) {
-        EntryType.CREDIT -> "+"
-        EntryType.DEBIT -> "-"
-        EntryType.ANCHOR -> "="
-    }
-
-    Card(
-        onClick = { onOpen(e) },
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "$sign ${Money.formatMinor(e.amountMinor)} EGP",
-                    Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = when (e.type) {
-                        EntryType.CREDIT -> brand.positive
-                        else -> MaterialTheme.colorScheme.onSurface
-                    },
-                )
-                if (e.type != EntryType.ANCHOR) {
-                    CategoryPill(category)
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(e.displayCounterparty(), style = MaterialTheme.typography.bodyMedium)
-            Text(
-                e.displayDate(),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun CategoryPill(category: Category?) {
-    val scheme = MaterialTheme.colorScheme
-    val uncategorised = category == null
-    Row(
-        Modifier
-            .clip(MaterialTheme.shapes.extraSmall)
-            .background(if (uncategorised) scheme.surfaceVariant else scheme.primaryContainer)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CategoryDot(category, size = 8)
-        Spacer(Modifier.width(6.dp))
-        Text(
-            category?.name ?: "Uncategorised",
-            style = MaterialTheme.typography.labelSmall,
-            color = if (uncategorised) scheme.onSurfaceVariant else scheme.onPrimaryContainer,
-        )
-    }
-}

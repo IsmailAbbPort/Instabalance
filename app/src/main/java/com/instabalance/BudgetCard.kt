@@ -79,6 +79,15 @@ internal fun BudgetCard(status: BudgetStatus, modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodySmall,
                 color = scheme.onSurfaceVariant,
             )
+            // Said out loud, because the spend total on the charts now legitimately exceeds the
+            // figure above and a reader who spots the gap cannot tell which number to trust.
+            if (status.excludedMinor > 0L) {
+                Text(
+                    "${Money.formatMinor(status.excludedMinor)} excluded (investments and transfers)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -120,6 +129,7 @@ internal fun budgetStatusOrNull(data: LedgerData): BudgetStatus? {
     val limit = data.monthlyBudgetMinor ?: return null
     if (limit <= 0L) return null
     return Budget.status(
-        data.entries, limit, java.time.Instant.now(), java.time.ZoneId.systemDefault()
+        data.entries, limit, java.time.Instant.now(), java.time.ZoneId.systemDefault(),
+        Categories.excludedIds(data.categories),
     )
 }

@@ -318,6 +318,32 @@ private fun CategoryEditSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+
+            // Income never counts against a spending budget, so offering the switch there would be
+            // a control that does nothing.
+            if (category.kind != CategoryKind.INCOME) {
+                Spacer(Modifier.height(20.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Counts toward the budget", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Turn off for money that leaves the account without being spending, " +
+                                "like a monthly investment or a transfer to your own account. It " +
+                                "stays an expense in the charts.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.size(12.dp))
+                    Switch(
+                        checked = !category.excludedFromBudget,
+                        onCheckedChange = {
+                            LedgerRepository.setCategoryExcludedFromBudget(category.id, !it)
+                        },
+                    )
+                }
+            }
+
             Spacer(Modifier.height(20.dp))
             Row {
                 TextButton(onClick = {

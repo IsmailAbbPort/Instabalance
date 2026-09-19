@@ -21,6 +21,15 @@ data class Category(
     val colorIndex: Int,
     val hidden: Boolean = false,
     val preset: Boolean = false,
+    /**
+     * Still an expense, still in the charts, but not counted against the monthly budget. Money
+     * moved into a fund leaves the account the same way a purchase does, so the bank reports it
+     * identically, but it is not spending and a budget that treats it as such is wrong every month.
+     *
+     * A flag on the category rather than a hard-coded id: transfers between your own accounts and
+     * credit card repayments are the same problem, and this way you can say so without a new build.
+     */
+    val excludedFromBudget: Boolean = false,
 )
 
 object Categories {
@@ -31,6 +40,7 @@ object Categories {
     const val REFUND = "refund"
     const val OTHER_EXPENSE = "other_expense"
     const val OTHER_INCOME = "other_income"
+    const val INVESTMENT = "investment"
 
     /**
      * Egypt-relevant defaults. `cash` is separate from `shopping` because the ATM withdrawal SMS is
@@ -50,6 +60,9 @@ object Categories {
         Category("education", "Education", CategoryKind.EXPENSE, 14, preset = true),
         Category("entertainment", "Entertainment", CategoryKind.EXPENSE, 18, preset = true),
         Category(CASH, "Cash withdrawal", CategoryKind.EXPENSE, 4, preset = true),
+        // Ships excluded from the budget, which is the whole reason it exists as its own category.
+        Category(INVESTMENT, "Investment", CategoryKind.EXPENSE, 8, preset = true,
+            excludedFromBudget = true),
         Category(FEES, "Fees", CategoryKind.EXPENSE, 2, preset = true),
         Category(OTHER_EXPENSE, "Other", CategoryKind.EXPENSE, 10, preset = true),
         Category("family", "Family transfer", CategoryKind.BOTH, 19, preset = true),
@@ -145,6 +158,18 @@ object Categories {
 
     fun setHidden(categories: List<Category>, id: String, hidden: Boolean): List<Category> =
         categories.map { if (it.id == id) it.copy(hidden = hidden) else it }
+
+    /** Presets included: excluding Rent or Cash from a budget is a legitimate thing to want. */
+    fun setExcludedFromBudget(categories: List<Category>, id: String, excluded: Boolean): List<Category> =
+        categories.map { if (it.id == id) it.copy(excludedFromBudget = excluded) else it }
+
+    /**
+     * Ids that do not count against the budget. An entry with no category is never in here: the app
+     * cannot exclude what it has not been told about, and quietly ignoring unsorted spending is the
+     * dangerous way to be wrong.
+     */
+    fun excludedIds(categories: List<Category>): Set<String> =
+        categories.filter { it.excludedFromBudget }.mapTo(mutableSetOf()) { it.id }
 
     /** How many entries a delete would send back to the inbox. Shown before confirming. */
     fun entryCount(entries: List<Entry>, id: String): Int = entries.count { it.categoryId == id }

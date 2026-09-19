@@ -95,7 +95,7 @@ class BudgetTest {
                 timestamp = at("2026-09-02T10:00:00Z").toEpochMilli()),
         )
 
-        val s = Budget.status(entries, budget, at("2026-09-18T12:00:00Z"), cairo)
+        val s = Budget.status(entries, budget, at("2026-09-18T12:00:00Z"), cairo, emptySet())
 
         assertEquals(150_000L, s.spentMinor)
         assertEquals(30, s.percent)
@@ -104,10 +104,94 @@ class BudgetTest {
     @Test fun statusProjectsAtTheCurrentDailyRate() {
         // 150,000 over 18 of September's 30 days projects to 250,000.
         val entries = listOf(debit(150_000, "2026-09-05T10:00:00Z"))
-        val s = Budget.status(entries, budget, at("2026-09-18T12:00:00Z"), cairo)
+        val s = Budget.status(entries, budget, at("2026-09-18T12:00:00Z"), cairo, emptySet())
 
         assertEquals(250_000L, s.projectedMinor)
         assertEquals(12, s.daysLeft)
+    }
+
+    // ---- categories excluded from the budget --------------------------------
+    //
+    // Money into a fund leaves the account exactly like a purchase does, so the bank reports it
+    // identically. Counting it as spending makes the budget wrong every single month.
+
+    private fun debit(minor: Long, iso: String, categoryId: String?) =
+        Entry(type = EntryType.DEBIT, amountMinor = minor, timestamp = at(iso).toEpochMilli(),
+            categoryId = categoryId)
+
+    @Test fun anExcludedCategoryDoesNotCountTowardTheBudget() {
+        val entries = listOf(
+            debit(100_000, "2026-09-05T10:00:00Z", "groceries"),
+            debit(300_000, "2026-09-06T10:00:00Z", Categories.INVESTMENT),
+        )
+
+        val s = Budget.status(entries, budget, at("2026-09-18T12:00:00Z"), cairo,
+            setOf(Categories.INVESTMENT))
+
+        assertEquals(100_000L, s.spentMinor)
+        assertEquals(20, s.percent)
+    }
+
+    @Test fun theExcludedAmountIsReportedRatherThanSilentlyDropped() {
+        val entries = listOf(
+            debit(100_000, "2026-09-05T10:00:00Z", "groceries"),
+            debit(300_000, "2026-09-06T10:00:00Z", Categories.INVESTMENT),
+        )
+
+        val s = Budget.status(entries, budget, at("2026-09-18T12:00:00Z"), cairo,
+            setOf(Categories.INVESTMENT))
+
+        assertEquals(300_000L, s.excludedMinor)
+    }
+
+    @Test fun anUncategorisedExpenseStillCounts() {
+        // The app cannot exclude what it has not been told about, and quietly ignoring unsorted
+        // spending is the dangerous direction to be wrong in.
+        val entries = listOf(debit(300_000, "2026-09-06T10:00:00Z", null))
+
+        val s = Budget.status(entries, budget, at("2026-09-18T12:00:00Z"), cairo,
+            setOf(Categories.INVESTMENT))
+
+        assertEquals(300_000L, s.spentMinor)
+        assertEquals(0L, s.excludedMinor)
+    }
+
+    @Test fun anExcludedExpenseNeverFiresAMilestone() {
+        val entries = listOf(debit(400_000, "2026-09-06T10:00:00Z", Categories.INVESTMENT))
+
+        val spent = Insights.spentInMonth(entries, at("2026-09-18T12:00:00Z"), cairo,
+            setOf(Categories.INVESTMENT))
+
+        assertEquals(0L, spent)
+        assertNull(Budget.milestoneToFire(spent, budget, highestFired = 0))
+    }
+
+    @Test fun investmentShipsExcludedSoTheOverrideWorksWithNoSetup() {
+        val investment = Categories.PRESETS.first { it.id == Categories.INVESTMENT }
+        assertEquals(true, investment.excludedFromBudget)
+        assertEquals(CategoryKind.EXPENSE, investment.kind)
+        // Nothing else ships excluded: the budget must not quietly ignore ordinary spending.
+        assertEquals(
+            listOf(Categories.INVESTMENT),
+            Categories.PRESETS.filter { it.excludedFromBudget }.map { it.id },
+        )
+    }
+
+    @Test fun existingUsersGetInvestmentOnUpgrade() {
+        // ensurePresets is what carries a new preset to a ledger written before it existed.
+        val old = Categories.PRESETS.filterNot { it.id == Categories.INVESTMENT }
+        val upgraded = Categories.ensurePresets(old)
+
+        val investment = upgraded.firstOrNull { it.id == Categories.INVESTMENT }
+        assertEquals(true, investment?.excludedFromBudget)
+    }
+
+    @Test fun excludingACategoryCanBeUndoneAndTheMoneyComesBack() {
+        val entries = listOf(debit(300_000, "2026-09-06T10:00:00Z", Categories.INVESTMENT))
+        val now = at("2026-09-18T12:00:00Z")
+
+        assertEquals(0L, Insights.spentInMonth(entries, now, cairo, setOf(Categories.INVESTMENT)))
+        assertEquals(300_000L, Insights.spentInMonth(entries, now, cairo, emptySet()))
     }
 
     @Test fun feesCountAsSpending() {
@@ -116,6 +200,6 @@ class BudgetTest {
             Entry(type = EntryType.DEBIT, amountMinor = 2_000, source = Source.FEE,
                 timestamp = at("2026-09-05T10:00:00Z").toEpochMilli()),
         )
-        assertEquals(2_000L, Budget.status(entries, budget, at("2026-09-18T12:00:00Z"), cairo).spentMinor)
+        assertEquals(2_000L, Budget.status(entries, budget, at("2026-09-18T12:00:00Z"), cairo, emptySet()).spentMinor)
     }
 }

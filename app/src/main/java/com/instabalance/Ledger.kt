@@ -290,7 +290,7 @@ object LedgerRepository {
     fun setBudget(limitMinor: Long?, now: Long = System.currentTimeMillis()) = synchronized(lock) {
         val d = _data.value
         val zone = ZoneId.systemDefault()
-        val spent = Insights.spentInMonth(d.entries, Instant.ofEpochMilli(now), zone)
+        val spent = Insights.spentInMonth(d.entries, Instant.ofEpochMilli(now), zone, Categories.excludedIds(d.categories))
         val next = d.copy(
             monthlyBudgetMinor = limitMinor,
             budgetMonth = Budget.monthKey(Instant.ofEpochMilli(now), zone),
@@ -319,7 +319,7 @@ object LedgerRepository {
         // alarm, no scheduled job, nothing running while the app is closed.
         val fired = if (d.budgetMonth == month) d.highestMilestoneFired else 0
 
-        val spent = Insights.spentInMonth(d.entries, instant, zone)
+        val spent = Insights.spentInMonth(d.entries, instant, zone, Categories.excludedIds(d.categories))
         val toFire = Budget.milestoneToFire(spent, limit, fired)
 
         if (toFire != null || d.budgetMonth != month) {
@@ -337,7 +337,7 @@ object LedgerRepository {
         val d = _data.value
         val limit = d.monthlyBudgetMinor ?: return
         if (milestone == null) return
-        val spent = Insights.spentInMonth(d.entries, Instant.now(), ZoneId.systemDefault())
+        val spent = Insights.spentInMonth(d.entries, Instant.now(), ZoneId.systemDefault(), Categories.excludedIds(d.categories))
         onBudgetMilestone?.invoke(milestone, spent, limit)
     }
 
@@ -396,6 +396,30 @@ object LedgerRepository {
     fun setCategoryHidden(id: String, hidden: Boolean) = mutate {
         it.copy(categories = Categories.setHidden(it.categories, id, hidden))
     }
+
+    /**
+     * Recomputes the fired-milestone state, the same way [setBudget] does. Excluding a category
+     * mid-month lowers what counts as spent, and leaving the old milestone standing would mean the
+     * alert you already got blocks the one you should get when you cross the line for real.
+     */
+    fun setCategoryExcludedFromBudget(id: String, excluded: Boolean, now: Long = System.currentTimeMillis()) =
+        mutate { d ->
+            val categories = Categories.setExcludedFromBudget(d.categories, id, excluded)
+            val limit = d.monthlyBudgetMinor
+            if (limit == null || limit <= 0L) {
+                d.copy(categories = categories)
+            } else {
+                val zone = ZoneId.systemDefault()
+                val spent = Insights.spentInMonth(
+                    d.entries, Instant.ofEpochMilli(now), zone, Categories.excludedIds(categories),
+                )
+                d.copy(
+                    categories = categories,
+                    budgetMonth = Budget.monthKey(Instant.ofEpochMilli(now), zone),
+                    highestMilestoneFired = Budget.reachedMilestone(spent, limit),
+                )
+            }
+        }
 
     fun deleteCategory(id: String) = mutate { Categories.delete(it, id) }
 

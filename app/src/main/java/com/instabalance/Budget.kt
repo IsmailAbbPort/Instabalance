@@ -11,6 +11,12 @@ data class BudgetStatus(
     val percent: Int,
     val daysLeft: Int,
     val projectedMinor: Long,
+    /**
+     * Expenses this month that a category excluded from the budget. Surfaced because the spend
+     * total on the charts and the figure on this card now legitimately differ, and a reader who
+     * finds the gap themselves has no way to tell which number is lying.
+     */
+    val excludedMinor: Long = 0L,
 )
 
 /**
@@ -45,8 +51,15 @@ object Budget {
     fun monthKey(now: Instant, zone: ZoneId): String =
         YearMonth.from(now.atZone(zone).toLocalDate()).toString()
 
-    fun status(entries: List<Entry>, limitMinor: Long, now: Instant, zone: ZoneId): BudgetStatus {
-        val spent = Insights.spentInMonth(entries, now, zone)
+    fun status(
+        entries: List<Entry>,
+        limitMinor: Long,
+        now: Instant,
+        zone: ZoneId,
+        excludedIds: Set<String>,
+    ): BudgetStatus {
+        val spent = Insights.spentInMonth(entries, now, zone, excludedIds)
+        val excluded = Insights.excludedInMonth(entries, now, zone, excludedIds)
         val today = now.atZone(zone).toLocalDate()
         val month = YearMonth.from(today)
         val dayOfMonth = today.dayOfMonth
@@ -62,6 +75,7 @@ object Budget {
             percent = percent,
             daysLeft = length - dayOfMonth,
             projectedMinor = projected,
+            excludedMinor = excluded,
         )
     }
 

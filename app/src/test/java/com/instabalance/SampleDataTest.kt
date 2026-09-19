@@ -111,7 +111,7 @@ class SampleDataTest {
     }
 
     @Test fun thisMonthHasSpendingSoTheBudgetCardIsNotEmpty() {
-        assertTrue(Insights.spentInMonth(entries, Instant.ofEpochMilli(now), zone) > 0)
+        assertTrue(Insights.spentInMonth(entries, Instant.ofEpochMilli(now), zone, emptySet()) > 0)
     }
 
     @Test fun everyRuleTargetsARealCategory() {

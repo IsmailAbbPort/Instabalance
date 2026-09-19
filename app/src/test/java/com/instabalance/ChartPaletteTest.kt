@@ -52,9 +52,22 @@ class ChartPaletteTest {
         assertEquals(ChartPalette.RAMP.size, ChartPalette.RAMP.toSet().size)
     }
 
-    @Test fun rampHasTwentyColours() {
-        // Twenty is the ceiling on categories that can each hold a unique colour.
-        assertEquals(20, ChartPalette.RAMP.size)
+    @Test fun rampHasTwentyFourColours() {
+        // The ceiling on categories that can each hold a unique colour.
+        assertEquals(24, ChartPalette.RAMP.size)
+    }
+
+    @Test fun thereAreSpareColoursForCategoriesOfYourOwn() {
+        // Twenty presets in a twenty-colour ramp meant the first custom category was forced to
+        // duplicate one, silently breaking the rule the swatch picker enforces everywhere else.
+        assertTrue(
+            "presets fill the ramp, leaving nothing unique for a custom category",
+            Categories.PRESETS.size < ChartPalette.RAMP.size,
+        )
+        assertEquals(
+            Categories.PRESETS.size,
+            Categories.PRESETS.map { it.colorIndex }.toSet().size,
+        )
     }
 
     /** CIE Lab, so "different" means different to an eye rather than different in hex. */

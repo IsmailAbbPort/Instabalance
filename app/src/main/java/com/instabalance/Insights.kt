@@ -146,12 +146,28 @@ object Insights {
         }
     }
 
-    /** Total for the month [now] falls in. What the budget measures against. */
-    fun spentInMonth(entries: List<Entry>, now: Instant, zone: ZoneId): Long {
-        val month = YearMonth.from(now.atZone(zone).toLocalDate())
-        return spendable(entries, EntryType.DEBIT)
-            .filter { it.monthIn(zone) == month }
+    /**
+     * Total for the month [now] falls in, minus anything filed under a category marked
+     * [Category.excludedFromBudget]. What the budget measures against.
+     *
+     * [excludedIds] is passed rather than read from a singleton so this stays pure, and it is a
+     * required argument rather than a defaulted one: a caller that forgets it would silently count
+     * investments as spending again, which is the bug this exists to fix.
+     */
+    fun spentInMonth(entries: List<Entry>, now: Instant, zone: ZoneId, excludedIds: Set<String>): Long =
+        monthlyDebits(entries, now, zone)
+            .filter { it.categoryId !in excludedIds }
             .sumOf { it.amountMinor }
+
+    /** The counterpart: what was left out of [spentInMonth], so the card can say so rather than hide it. */
+    fun excludedInMonth(entries: List<Entry>, now: Instant, zone: ZoneId, excludedIds: Set<String>): Long =
+        monthlyDebits(entries, now, zone)
+            .filter { it.categoryId in excludedIds }
+            .sumOf { it.amountMinor }
+
+    private fun monthlyDebits(entries: List<Entry>, now: Instant, zone: ZoneId): Sequence<Entry> {
+        val month = YearMonth.from(now.atZone(zone).toLocalDate())
+        return spendable(entries, EntryType.DEBIT).filter { it.monthIn(zone) == month }
     }
 
     fun monthComparison(
