@@ -43,6 +43,7 @@ internal fun InsightsSection(data: LedgerData) {
     var showIncome by remember { mutableStateOf(false) }
     var period by remember { mutableStateOf(Period.MONTH) }
     var selected by remember { mutableIntStateOf(-1) }
+    var selectedBar by remember { mutableIntStateOf(-1) }
 
     val type = if (showIncome) EntryType.CREDIT else EntryType.DEBIT
     val zone = remember { ZoneId.systemDefault() }
@@ -95,7 +96,7 @@ internal fun InsightsSection(data: LedgerData) {
             listOf(false, true).forEachIndexed { i, income ->
                 SegmentedButton(
                     selected = showIncome == income,
-                    onClick = { showIncome = income; selected = -1 },
+                    onClick = { showIncome = income; selected = -1; selectedBar = -1 },
                     shape = SegmentedButtonDefaults.itemShape(i, 2),
                 ) { Text(if (income) "Income" else "Expenses") }
             }
@@ -105,7 +106,7 @@ internal fun InsightsSection(data: LedgerData) {
             Period.entries.forEachIndexed { i, p ->
                 SegmentedButton(
                     selected = period == p,
-                    onClick = { period = p; selected = -1 },
+                    onClick = { period = p; selected = -1; selectedBar = -1 },
                     shape = SegmentedButtonDefaults.itemShape(i, Period.entries.size),
                 ) { Text(p.label, style = MaterialTheme.typography.labelMedium) }
             }
@@ -140,7 +141,35 @@ internal fun InsightsSection(data: LedgerData) {
             if (buckets.all { it.amountMinor == 0L }) {
                 EmptyChart("Nothing in this period yet")
             } else {
-                BarChart(buckets, highlightLast = true)
+                // Thirty dates will not fit along an axis at a readable size, so a bar says which
+                // day it is by being tapped. The readout keeps a fixed height whether or not
+                // anything is selected, so the card does not jump as you tap along the chart.
+                val picked = buckets.getOrNull(selectedBar)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        picked?.fullLabel ?: "Tap a bar for its day",
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (picked != null) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (picked != null) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (picked != null) {
+                        Text(
+                            "${Money.formatMinor(picked.amountMinor)} EGP",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                BarChart(
+                    buckets = buckets,
+                    highlightLast = true,
+                    selectedIndex = selectedBar,
+                    onSelect = { selectedBar = if (it == selectedBar) -1 else it },
+                )
             }
         }
 

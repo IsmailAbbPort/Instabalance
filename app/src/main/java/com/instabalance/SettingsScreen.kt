@@ -33,11 +33,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -123,11 +129,40 @@ private fun NavRow(title: String, subtitle: String, onClick: () -> Unit) {
 @Composable
 private fun BudgetSetting(data: LedgerData) {
     val context = LocalContext.current
-    val activity = context as? FragmentActivity
     var amount by remember(data.monthlyBudgetMinor) {
         mutableStateOf(data.monthlyBudgetMinor?.let { Money.formatMinor(it) } ?: "")
     }
-    val notificationsOn = NotificationManagerCompat.from(context).areNotificationsEnabled()
+
+    // Re-read on every resume, so granting the permission in system settings and coming back
+    // updates this without a restart. Reading it once at composition left the warning stale.
+    var notificationsOn by remember { mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled()) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                notificationsOn = NotificationManagerCompat.from(context).areNotificationsEnabled()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> notificationsOn = granted }
+
+    fun askForNotifications() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            // Below 13 there is no runtime permission; the only way back is the system screen.
+            LedgerRepository.suppressNextLock()
+            context.startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            )
+        }
+    }
 
     Card(
         Modifier.fillMaxWidth(),
@@ -155,22 +190,28 @@ private fun BudgetSetting(data: LedgerData) {
                 TextButton(onClick = {
                     val minor = if (amount.isBlank()) null else Money.parseToMinor(amount)
                     LedgerRepository.setBudget(minor)
-                    if (minor != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                        !notificationsOn && activity != null
-                    ) {
-                        ActivityCompat.requestPermissions(
-                            activity, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1002
-                        )
-                    }
+                    if (minor != null && !notificationsOn) askForNotifications()
                 }) { Text("Save budget") }
             }
+
+            // A budget with notifications off is silently useless. Say so, and give the way back:
+            // the permission can be set outside this screen (or a budget can arrive without ever
+            // passing through it), so the fix cannot live only on the Save button.
             if (data.monthlyBudgetMinor != null && !notificationsOn) {
-                // Say so rather than letting the user believe alerts are armed when they are not.
                 Text(
-                    "Notifications are turned off for this app, so the budget card on Home will " +
-                        "update but no alerts will be sent.",
+                    "Alerts are off. Notifications are not allowed for this app, so the card on " +
+                        "Home will keep updating but nothing will be sent when you pass a milestone.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
+                )
+                OutlinedButton(onClick = { askForNotifications() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Turn on budget alerts")
+                }
+            } else if (data.monthlyBudgetMinor != null) {
+                Text(
+                    "Alerts are on.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

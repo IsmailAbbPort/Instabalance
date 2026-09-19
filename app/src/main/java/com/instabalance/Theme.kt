@@ -74,7 +74,11 @@ private val InstaBalanceColors = lightColorScheme(
     onSurface = Ink,
     surfaceVariant = Color(0xFFEFEFF6),
     onSurfaceVariant = Muted,
-    outline = Color(0xFFE4E4EC),
+    // Material3 draws an OutlinedTextField's resting border in `outline`. At the near-white value
+    // this had, the fields read as disabled: you could not see where to tap. `outlineVariant` is
+    // what stays faint, and is what card borders and chart gridlines use.
+    outline = Color(0xFF9A9AAE),
+    outlineVariant = Color(0xFFE4E4EC),
 )
 
 // Amounts use tabular figures ("tnum") so a changing balance does not jitter its own width.

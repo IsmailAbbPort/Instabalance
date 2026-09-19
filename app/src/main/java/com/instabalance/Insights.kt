@@ -8,8 +8,12 @@ import java.time.ZoneId
 /** One arc of the ring. A null [categoryId] is the deliberate "Uncategorised" slice. */
 data class Slice(val categoryId: String?, val amountMinor: Long)
 
-/** One bar. [label] is already formatted for the axis. */
-data class Bucket(val label: String, val amountMinor: Long)
+/**
+ * One bar. [label] is the short axis tick ("18", "Sep"); [fullLabel] is what the readout shows
+ * when the bar is tapped ("18 Sep 2026", "September 2026"). Tapping is how a bar says which day it
+ * is: thirty labels along an axis would have to be unreadably small to fit.
+ */
+data class Bucket(val label: String, val fullLabel: String, val amountMinor: Long)
 
 /**
  * Month to date against the same number of days of the previous month. Comparing a partial month
@@ -110,7 +114,11 @@ object Insights {
             .mapValues { (_, es) -> es.sumOf { it.amountMinor } }
         return (0 until days).map { i ->
             val d = start.plusDays(i.toLong())
-            Bucket(d.dayOfMonth.toString(), totals[d] ?: 0L)
+            Bucket(
+                label = d.dayOfMonth.toString(),
+                fullLabel = "${d.dayOfMonth} ${MONTH_LABELS[d.monthValue - 1]} ${d.year}",
+                amountMinor = totals[d] ?: 0L,
+            )
         }
     }
 
@@ -130,7 +138,11 @@ object Insights {
             .mapValues { (_, es) -> es.sumOf { it.amountMinor } }
         return (0 until months).map { i ->
             val m = start.plusMonths(i.toLong())
-            Bucket(MONTH_LABELS[m.monthValue - 1], totals[m] ?: 0L)
+            Bucket(
+                label = MONTH_LABELS[m.monthValue - 1],
+                fullLabel = "${MONTH_NAMES[m.monthValue - 1]} ${m.year}",
+                amountMinor = totals[m] ?: 0L,
+            )
         }
     }
 
@@ -192,7 +204,13 @@ object Insights {
         return angles.indexOfFirst { (start, sweep) -> a >= start && a < start + sweep }
     }
 
+    // English explicitly, so an ar-EG device does not render a mix of scripts on the axis.
     private val MONTH_LABELS = listOf(
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    )
+
+    private val MONTH_NAMES = listOf(
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
     )
 }

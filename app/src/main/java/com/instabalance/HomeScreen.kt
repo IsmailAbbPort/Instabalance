@@ -156,12 +156,15 @@ internal fun HomeScreen(onSettings: () -> Unit, onInbox: () -> Unit) {
     if (dialog != Dialog.NONE) {
         AmountDialog(
             kind = dialog,
+            categories = data.categories,
             onDismiss = { dialog = Dialog.NONE },
-            onConfirm = { minor, note ->
+            onConfirm = { minor, note, categoryId ->
                 val now = System.currentTimeMillis()
                 when (dialog) {
-                    Dialog.CREDIT -> LedgerRepository.addManual(EntryType.CREDIT, minor, note, now)
-                    Dialog.DEBIT -> LedgerRepository.addManual(EntryType.DEBIT, minor, note, now)
+                    Dialog.CREDIT ->
+                        LedgerRepository.addManual(EntryType.CREDIT, minor, note, now, categoryId)
+                    Dialog.DEBIT ->
+                        LedgerRepository.addManual(EntryType.DEBIT, minor, note, now, categoryId)
                     Dialog.ANCHOR -> LedgerRepository.setBalance(minor, note, now)
                     Dialog.NONE -> {}
                 }

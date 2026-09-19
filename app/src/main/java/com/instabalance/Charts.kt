@@ -2,6 +2,7 @@ package com.instabalance
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -174,12 +175,14 @@ private fun LegendSwatch(colour: Color) {
 internal fun BarChart(
     buckets: List<Bucket>,
     highlightLast: Boolean,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val max = buckets.maxOfOrNull { it.amountMinor } ?: 0L
     val bar = MaterialTheme.colorScheme.primary
     val highlight = MaterialTheme.colorScheme.secondary
-    val grid = MaterialTheme.colorScheme.outline
+    val grid = MaterialTheme.colorScheme.outlineVariant
 
     val chartHeight = 140.dp
     val axisLabel = MaterialTheme.typography.labelSmall
@@ -205,7 +208,20 @@ internal fun BarChart(
                 }
             }
 
-            Canvas(Modifier.weight(1f).height(chartHeight)) {
+            Canvas(
+                Modifier
+                    .weight(1f)
+                    .height(chartHeight)
+                    .pointerInput(buckets.size) {
+                        // Tapping anywhere in a bar's column selects it, not just the drawn bar:
+                        // a near-zero day is a 2px target otherwise.
+                        detectTapGestures { offset ->
+                            if (buckets.isEmpty()) return@detectTapGestures
+                            val i = (offset.x / (size.width.toFloat() / buckets.size)).toInt()
+                            onSelect(i.coerceIn(0, buckets.lastIndex))
+                        }
+                    }
+            ) {
                 val count = buckets.size
                 if (count == 0) return@Canvas
 
@@ -221,11 +237,20 @@ internal fun BarChart(
                 val radius = androidx.compose.ui.geometry.CornerRadius(width / 3f, width / 3f)
 
                 buckets.forEachIndexed { i, b ->
-                    if (b.amountMinor <= 0L) return@forEachIndexed
-                    val h = size.height * (b.amountMinor.toFloat() / max.toFloat())
+                    val selected = i == selectedIndex
+                    // A selected empty day still needs a visible marker, or tapping it looks broken.
+                    val h = if (b.amountMinor <= 0L) {
+                        if (selected) 3.dp.toPx() else return@forEachIndexed
+                    } else {
+                        size.height * (b.amountMinor.toFloat() / max.toFloat())
+                    }
                     val x = slot * i + (slot - width) / 2f
                     drawRoundRect(
-                        color = if (highlightLast && i == count - 1) highlight else bar,
+                        color = when {
+                            selected -> highlight
+                            highlightLast && i == count - 1 -> highlight.copy(alpha = 0.55f)
+                            else -> bar
+                        },
                         topLeft = Offset(x, size.height - h),
                         size = Size(width, h),
                         cornerRadius = radius,

@@ -143,6 +143,17 @@ class InsightsTest {
         assertEquals(listOf(1_000L, 0L, 3_000L), buckets.map { it.amountMinor })
     }
 
+    @Test fun bucketsCarryAFullDateForTheTapReadout() {
+        // The axis tick is "18"; the readout has to say which month and year, because thirty
+        // dates cannot fit along an axis at a readable size.
+        val daily = Insights.daily(emptyList(), EntryType.DEBIT, 3, at("2026-09-18T12:00:00Z"), cairo)
+        assertEquals(listOf("16", "17", "18"), daily.map { it.label })
+        assertEquals("18 Sep 2026", daily.last().fullLabel)
+
+        val monthly = Insights.monthly(emptyList(), EntryType.DEBIT, 2, at("2026-09-18T12:00:00Z"), cairo)
+        assertEquals("September 2026", monthly.last().fullLabel)
+    }
+
     // ---- time zone correctness ---------------------------------------------
 
     @Test fun bucketsUseLocalMidnightNotUtc() {
