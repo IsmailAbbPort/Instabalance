@@ -23,17 +23,11 @@ import androidx.compose.ui.unit.sp
  *    active nav). InstaPay does not use purple for buttons.
  */
 
-// Sampled from a screenshot of the real app rather than guessed from the logo. The header is the
-// part that had to be measured: its purple runs bright on the left to deep on the right, and its
-// orange is itself a gradient sitting on a flat coral sheet.
-private val Violet = Color(0xFF7100D6)
-private val VioletBright = Color(0xFF8A00EC)
-private val VioletDeep = Color(0xFF5A01B1)
-private val VioletStatus = Color(0xFF9000FF)
+private val Violet = Color(0xFF7A12D4)
+private val VioletBright = Color(0xFF8E24E8)
+private val VioletDeep = Color(0xFF4A0B85)
 private val Orange = Color(0xFFF26722)
-private val OrangeLight = Color(0xFFF87E57)
-private val OrangeDeep = Color(0xFFEB5427)
-private val Coral = Color(0xFFF38270)
+private val Coral = Color(0xFFF79070)
 private val Ground = Color(0xFFF4F4F9)
 private val Ink = Color(0xFF1A1A1F)
 private val Muted = Color(0xFF9A9AA5)
@@ -45,17 +39,12 @@ private val Muted = Color(0xFF9A9AA5)
 data class BrandColors(
     val violetBright: Color = VioletBright,
     val violetDeep: Color = VioletDeep,
-    /** The flat strip behind the status bar, brighter than the header body below it. */
-    val violetStatus: Color = VioletStatus,
     val positive: Color = Color(0xFF0F7A5C),
     val positiveContainer: Color = Color(0xFFCDF3E4),
     val sentBadge: Color = Color(0xFF2E6BFF),
     val receivedBadge: Color = Color(0xFF17C39A),
-    /** The front tab's own gradient, light at its top left to deep at its bottom right. */
-    val orangeLight: Color = OrangeLight,
-    val orangeDeep: Color = OrangeDeep,
-    /** The sheet behind it, which is flat: no gradient of its own. */
-    val coral: Color = Coral,
+    val blobStart: Color = Orange,
+    val blobEnd: Color = Coral,
 )
 
 val LocalBrand = staticCompositionLocalOf { BrandColors() }

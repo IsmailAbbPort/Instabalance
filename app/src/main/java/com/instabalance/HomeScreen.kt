@@ -1,4 +1,4 @@
-﻿package com.instabalance
+package com.instabalance
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -68,7 +68,7 @@ internal fun HomeScreen(onSettings: () -> Unit, onInbox: () -> Unit) {
                 // sits over the purple, so purple stays visible down both sides of the card. Done
                 // once here rather than per item, or every offset would leave its layout gap
                 // behind. The matching Spacer at the bottom gives the scroll its height back.
-                .offset(y = (-89).dp)
+                .offset(y = (-84).dp)
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
