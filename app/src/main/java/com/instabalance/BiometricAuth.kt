@@ -34,7 +34,7 @@ object BiometricAuth {
             }
         )
         val info = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Unlock Fuck Instapay")
+            .setTitle("Unlock InstaBalance")
             .setSubtitle("Verify it's you")
             .setNegativeButtonText("Use passcode")
             .setAllowedAuthenticators(AUTHENTICATORS)

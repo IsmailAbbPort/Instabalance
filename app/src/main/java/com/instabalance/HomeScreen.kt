@@ -290,7 +290,7 @@ private fun BrandPage(
     ) {
         BrandHeader(
             greeting = rememberGreeting(),
-            title = "Fuck Instapay",
+            title = "InstaBalance",
             onSettings = onSettings,
         )
 

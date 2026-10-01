@@ -71,7 +71,7 @@ internal fun LockScreen(activity: FragmentActivity?, biometricEnabled: Boolean, 
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(Modifier.weight(1f))
-        Text("Fuck Instapay", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("InstaBalance", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text("Enter passcode to unlock", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(32.dp))

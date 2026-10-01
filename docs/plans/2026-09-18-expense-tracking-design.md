@@ -1,6 +1,6 @@
 # Expense tracking design: categories, review inbox, insights, design system
 
-Date: 2026-09-18. Repo: `Fuck Instapay` (Gradle root project `InstaBalance`), single `:app` module, package `com.instabalance`.
+Date: 2026-09-18. Repo: `InstaBalance` (Gradle root project `InstaBalance`), single `:app` module, package `com.instabalance`.
 
 ## 0. What this plan covers
 

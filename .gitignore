@@ -31,3 +31,7 @@ Thumbs.db
 
 # Encrypted ledger copies pulled from the phone for debugging. Real financial data.
 .ledger-backups/
+
+# The old launcher art: InstaPay's own logo with a word over it. Kept locally, not published,
+# for the same reason as the reference screenshots above.
+app/src/main/res/mipmap-xxxhdpi/app_logo.webp

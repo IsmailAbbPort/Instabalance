@@ -1,6 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The logo, inset so the adaptive-icon mask (circle/squircle) never crops the artwork.
-     108dp canvas, 18dp inset each side -> content sits in the center 72dp safe zone. -->
-<inset xmlns:android="http://schemas.android.com/apk/res/android"
-    android:drawable="@mipmap/app_logo"
-    android:inset="18dp" />
+<!--
+  Drawn here rather than shipped as a bitmap, and drawn from scratch rather than adapted from
+  anybody else's mark. The chevrons echo the app's own header, which is the one visual idea this
+  project owns; the previous icon was InstaPay's logo with a word over it, and neither half of that
+  belongs in a public repository.
+
+  108dp canvas. Content stays inside the centre 72dp safe zone so the adaptive-icon mask
+  (circle, squircle, whatever the launcher picks) never crops it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Coral, furthest back and lowest, so only its trailing edge shows past the others. -->
+    <path
+        android:fillColor="#F79070"
+        android:pathData="M30,34 L42,34 L60,54 L42,74 L30,74 L48,54 Z" />
+
+    <!-- Orange, the middle chevron. -->
+    <path
+        android:fillColor="#F26722"
+        android:pathData="M46,34 L58,34 L76,54 L58,74 L46,74 L64,54 Z" />
+
+    <!-- Violet, the identity colour, leading the stack. -->
+    <path
+        android:fillColor="#7A12D4"
+        android:pathData="M62,34 L74,34 L92,54 L74,74 L62,74 L80,54 Z" />
+
+    <!-- The ledger's standing mark: a short upright bar, the "i" of the wordmark. -->
+    <path
+        android:fillColor="#4A0B85"
+        android:pathData="M16,34 L28,34 L28,74 L16,74 Z" />
+</vector>
