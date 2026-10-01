@@ -78,24 +78,67 @@ object Insights {
     }
 
     /**
+     * What the ring draws, plus what got folded into the roll-up. The tail is kept rather than
+     * summed away so the legend can open it: "Other categories" as a dead end tells you a number
+     * and refuses to say what it is made of.
+     */
+    data class Rollup(val visible: List<Slice>, val tail: List<Slice>)
+
+    /**
+     * Fewer than this in the tail and rolling up is not worth it: one category folded away costs
+     * its name and saves a single row, which is a worse chart than just showing it.
+     */
+    private const val MIN_ROLLUP = 2
+
+    /**
      * Beyond [n], slices become one roll-up, so the ring never grows untappable slivers.
      *
      * The uncategorised slice is never rolled up. It sorts last, so a naive take(n) would fold it
      * into "Other categories" and the ring would quietly stop admitting how much it does not know,
      * which is the exact dishonesty having a separate slice exists to prevent.
+     *
+     * Zero-amount slices never count toward the tail, because no arc is drawn for them and a
+     * roll-up that stands for nothing is just a row saying zero.
      */
-    fun topN(slices: List<Slice>, n: Int): List<Slice> {
+    fun rollUp(slices: List<Slice>, n: Int): Rollup {
         val unknown = slices.firstOrNull { it.categoryId == null }
         val known = slices.filter { it.categoryId != null }
-        if (known.size <= n) return slices
+        val tail = known.drop(n).filter { it.amountMinor > 0 }
+        if (tail.size < MIN_ROLLUP) return Rollup(slices, emptyList())
 
-        val head = known.take(n)
-        val rest = known.drop(n).sumOf { it.amountMinor }
-        return buildList {
-            addAll(head)
-            if (rest > 0) add(Slice(OTHER_ROLLUP, rest))
+        val visible = buildList {
+            addAll(known.take(n))
+            add(Slice(OTHER_ROLLUP, tail.sumOf { it.amountMinor }))
             unknown?.let { add(it) }
         }
+        return Rollup(visible, tail)
+    }
+
+    /** Just the drawn slices, for callers that have no legend to expand. */
+    fun topN(slices: List<Slice>, n: Int): List<Slice> = rollUp(slices, n).visible
+
+    /**
+     * How many bars to skip between axis labels. Thirty dates cannot fit along the axis at a
+     * readable size, and a chart labelled only at its two ends makes you count bars.
+     *
+     * Derived rather than fixed at every third: a fixed 3 would label two of the six month bars.
+     * At the default this gives every third day over thirty, every fourth over a long month, and
+     * every month over six.
+     */
+    fun axisLabelStep(count: Int, maxLabels: Int = 10): Int {
+        if (count <= 0 || maxLabels <= 0) return 1
+        return if (count <= maxLabels) 1 else (count + maxLabels - 1) / maxLabels
+    }
+
+    /**
+     * Which bars carry a label, counted back from the last one so the most recent bar is always
+     * labelled. Today is the bar you look at first, and an axis that stops three days short of it
+     * looks stale.
+     */
+    fun axisLabelIndices(count: Int, maxLabels: Int = 10): Set<Int> {
+        if (count <= 0) return emptySet()
+        val step = axisLabelStep(count, maxLabels)
+        return generateSequence(count - 1) { it - step }.takeWhile { it >= 0 }.toSet()
     }
 
     /** One bucket per day, including the empty ones: a gap in a bar chart has to be visible. */
@@ -119,6 +162,52 @@ object Insights {
                 fullLabel = "${d.dayOfMonth} ${MONTH_LABELS[d.monthValue - 1]} ${d.year}",
                 amountMinor = totals[d] ?: 0L,
             )
+        }
+    }
+
+    /**
+     * What the balance was at [atMillis], by the same rule the headline balance uses: the most
+     * recent anchor at or before that moment, plus everything signed that happened between.
+     *
+     * Null before the first anchor ever set. The balance is not zero then, it is unknown, and
+     * drawing a confident zero is worse than drawing nothing.
+     */
+    fun balanceAt(entries: List<Entry>, atMillis: Long): Long? {
+        val anchor = entries
+            .filter { it.type == EntryType.ANCHOR && it.timestamp <= atMillis }
+            .maxByOrNull { it.timestamp }
+            ?: return null
+        val delta = entries
+            .filter { it.type != EntryType.ANCHOR }
+            .filter { it.timestamp > anchor.timestamp && it.timestamp <= atMillis }
+            .sumOf { if (it.type == EntryType.CREDIT) it.amountMinor else -it.amountMinor }
+        return anchor.amountMinor + delta
+    }
+
+    /**
+     * The closing balance at the end of each of the last [days] days, oldest first.
+     *
+     * The app has always known this and only ever shown today's figure. Where the money went is a
+     * bar chart; whether you are running down is a line, and the two answer different questions.
+     *
+     * Days before the first anchor are left out rather than zeroed, so the line starts where the
+     * ledger actually starts knowing. That also means a re-sync partway through the window is not
+     * a step to explain away: it is the point at which the record was corrected.
+     */
+    fun balanceSeries(entries: List<Entry>, days: Int, now: Instant, zone: ZoneId): List<Bucket> {
+        val today = now.atZone(zone).toLocalDate()
+        val start = today.minusDays((days - 1).toLong())
+        return (0 until days).mapNotNull { i ->
+            val d = start.plusDays(i.toLong())
+            // End of that day, to the millisecond, so a transaction at 23:59 counts on its own day.
+            val endOfDay = d.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1
+            balanceAt(entries, endOfDay)?.let { balance ->
+                Bucket(
+                    label = d.dayOfMonth.toString(),
+                    fullLabel = "${d.dayOfMonth} ${MONTH_LABELS[d.monthValue - 1]} ${d.year}",
+                    amountMinor = balance,
+                )
+            }
         }
     }
 
@@ -158,6 +247,13 @@ object Insights {
         monthlyDebits(entries, now, zone)
             .filter { it.categoryId !in excludedIds }
             .sumOf { it.amountMinor }
+
+    /** This month's spend per category id, for the categories that set themselves a limit. */
+    fun spentInMonthByCategory(entries: List<Entry>, now: Instant, zone: ZoneId): Map<String, Long> =
+        monthlyDebits(entries, now, zone)
+            .filter { it.categoryId != null }
+            .groupBy { it.categoryId!! }
+            .mapValues { (_, es) -> es.sumOf { it.amountMinor } }
 
     /** The counterpart: what was left out of [spentInMonth], so the card can say so rather than hide it. */
     fun excludedInMonth(entries: List<Entry>, now: Instant, zone: ZoneId, excludedIds: Set<String>): Long =

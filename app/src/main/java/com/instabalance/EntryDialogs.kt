@@ -24,11 +24,54 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 
+/**
+ * What the re-sync dialog says underneath the amount.
+ *
+ * Two numbers are already in hand at this moment: what the ledger thinks you have, and what you are
+ * typing in from the real app. Until now the difference was absorbed silently, which meant there
+ * was no way to tell a capture that is working from one that has been quietly missing messages for
+ * a fortnight. Naming the gap is the whole feature; it is also the thing to look at later when
+ * asking why the numbers drifted.
+ *
+ * [since] is when the ledger was last anchored, so the sentence can say what period the gap covers.
+ */
+internal fun anchorDeltaText(
+    typedMinor: Long?,
+    currentMinor: Long,
+    since: Long?,
+    now: Long = System.currentTimeMillis(),
+): String {
+    val ledger = "The app has you at ${Money.formatMinor(currentMinor)} EGP"
+    if (typedMinor == null) return "$ledger."
+
+    val drift = typedMinor - currentMinor
+    if (drift == 0L) return "$ledger, which matches exactly."
+
+    val size = Money.formatMinor(kotlin.math.abs(drift))
+    val direction = if (drift > 0) "more" else "less"
+    val period = sinceText(since, now)
+    return "$ledger. That is $size EGP $direction than recorded$period, " +
+        "so something moved without a message."
+}
+
+private fun sinceText(since: Long?, now: Long): String {
+    if (since == null) return ""
+    val days = ((now - since) / (24 * 60 * 60 * 1000L)).toInt()
+    return when {
+        days < 0 -> ""
+        days == 0 -> " since the last sync today"
+        days == 1 -> " in the last day"
+        else -> " over the last $days days"
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun AmountDialog(
     kind: Dialog,
     categories: List<Category>,
+    currentBalanceMinor: Long,
+    lastAnchorAt: Long?,
     onDismiss: () -> Unit,
     onConfirm: (Long, String, String?) -> Unit,
 ) {
@@ -66,6 +109,18 @@ internal fun AmountDialog(
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                 )
+                // Only on a re-sync, where the app already knows both numbers and has until now
+                // thrown the comparison away. The gap between them is money that moved without a
+                // message the app ever saw, which is the one measure of whether the capture is
+                // working at all.
+                if (kind == Dialog.ANCHOR) {
+                    Text(
+                        anchorDeltaText(minor, currentBalanceMinor, lastAnchorAt),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it },

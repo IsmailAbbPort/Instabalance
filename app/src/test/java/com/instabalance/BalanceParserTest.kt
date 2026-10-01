@@ -142,4 +142,50 @@ class BalanceParserTest {
         // The amount and the direction are the money; the merchant is a convenience.
         assertTxn("تم الشراء بمبلغ ١٦٥جم على الكارت", EntryType.DEBIT, 16500)
     }
+
+    // ---- Real EGBANK card purchases, verbatim ----
+    // These arrive with the bank's own "[EGBANK]" tag wedged into the middle of the card number and
+    // with the shop on its own line. Every one of them used to miss the card-purchase branch and
+    // fall through to a fallback that keeps only the first word after "من", so MISR PETROLEUM was
+    // stored as "MISR" (which a rule cannot tell from Banque Misr) and CHILL OUT, written with no
+    // space after "من", stored nothing at all.
+
+    @Test fun realTalabat_keepsTheShopFromTheNextLine() {
+        val r = parse("[EGBANK]\n\nتم الشراء بمبلغ 113جم على الكارت رقم ++\n\n0954 من\n\nTalabat\n\nMaadi")
+        assertTxn(
+            "[EGBANK]\n\nتم الشراء بمبلغ 113جم على الكارت رقم ++\n\n0954 من\n\nTalabat\n\nMaadi",
+            EntryType.DEBIT, 11300,
+        )
+        assertEquals("Talabat", r!!.merchant)
+    }
+
+    @Test fun realMisrPetroleum_keepsBothWordsNotJustMisr() {
+        val r = parse("تم الشراء بمبلغ 755 جم على الكارت رقم ++ [EGBANK]\n\n0954 من MISR PETROLEUM со CAIRO")
+        assertEquals("MISR PETROLEUM со CAIRO", r!!.merchant)
+        assertEquals(75500, r.amountMinor)
+    }
+
+    @Test fun realChillOut_withNoSpaceAfterMin_stillNamesTheShop() {
+        val r = parse("تم الشراء بمبلغ 800 جم على الكارت رقم ++ [EGBANK] 0954 منCHILL OUT - GARDINYA SCAIRO N 07")
+        assertEquals("CHILL OUT - GARDINYA SCAIRO N 07", r!!.merchant)
+    }
+
+    @Test fun realChillout_theOtherSpelling() {
+        val r = parse("تم الشراء بمبلغ 800 جم على الكارت رقم ++ [EGBANK] 0954 من CHILLOUT NAFAQ ELOBOURCAIRO")
+        assertEquals("CHILLOUT NAFAQ ELOBOURCAIRO", r!!.merchant)
+    }
+
+    @Test fun realSeoudi_keepsTheBranchSuffix() {
+        val r = parse("[EGBANK]\n\nتم الشراء بمبلغ 201.53 جم على الكارت رقم ++\n\n0954 من\n\nSEOUDI-ROXY\n\nCAIRO E 07")
+        assertEquals("SEOUDI-ROXY", r!!.merchant)
+        assertEquals(20153, r.amountMinor)
+    }
+
+    @Test fun aTrailingBalanceLineIsNeverReadAsTheShop() {
+        // The merchant capture stops at the end of its line. Letting it run to the end of the
+        // message would swallow the balance sentence banks put underneath.
+        val r = parse("تم الشراء بمبلغ 50جم على الكارت رقم ++ [EGBANK] 0954 من SEOUDI-ROXY\nالرصيد المتاح 2091.36جم")
+        assertEquals("SEOUDI-ROXY", r!!.merchant)
+        assertEquals(5000, r.amountMinor)
+    }
 }

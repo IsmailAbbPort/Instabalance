@@ -296,4 +296,158 @@ class TransactionFilterTest {
 
         assertEquals(listOf("hit"), ids(out))
     }
+
+    // ---- which category chips a direction should offer -----------------------
+
+    @Test fun expensesNeverOffersAnIncomeOnlyCategory() {
+        val out = TransactionFilters.selectableCategories(categories, Direction.EXPENSE)
+
+        assertTrue(out.any { it.id == "groceries" })
+        assertTrue("a family transfer is both, so it belongs in either direction",
+            out.any { it.id == "family" })
+        assertFalse(out.any { it.id == "salary" })
+        assertFalse(out.any { it.id == Categories.OTHER_INCOME })
+    }
+
+    @Test fun incomeNeverOffersAnExpenseOnlyCategory() {
+        val out = TransactionFilters.selectableCategories(categories, Direction.INCOME)
+
+        assertTrue(out.any { it.id == "salary" })
+        assertTrue(out.any { it.id == "family" })
+        assertFalse(out.any { it.id == "groceries" })
+        assertFalse(out.any { it.id == Categories.OTHER_EXPENSE })
+    }
+
+    @Test fun allOffersEverythingVisible() {
+        assertEquals(
+            categories.filter { !it.hidden }.size,
+            TransactionFilters.selectableCategories(categories, Direction.ALL).size,
+        )
+    }
+
+    @Test fun aHiddenCategoryIsNeverOffered() {
+        val hidden = Categories.setHidden(categories, "groceries", true)
+        assertFalse(
+            TransactionFilters.selectableCategories(hidden, Direction.EXPENSE)
+                .any { it.id == "groceries" }
+        )
+    }
+
+    // ---- pruning a selection the direction no longer offers -------------------
+
+    @Test fun switchingToExpensesDropsASelectedIncomeCategory() {
+        // Otherwise the chip disappears, the badge still says filtered, and the list is empty for
+        // a reason nothing on screen explains.
+        val filter = TransactionFilter(
+            direction = Direction.EXPENSE,
+            categoryIds = setOf("salary", "groceries"),
+        )
+
+        assertEquals(
+            setOf<String?>("groceries"),
+            TransactionFilters.pruneForDirection(filter, categories).categoryIds,
+        )
+    }
+
+    @Test fun pruningKeepsTheUncategorisedBucketInEveryDirection() {
+        val filter = TransactionFilter(direction = Direction.INCOME, categoryIds = setOf(null, "groceries"))
+
+        assertEquals(
+            setOf<String?>(null),
+            TransactionFilters.pruneForDirection(filter, categories).categoryIds,
+        )
+    }
+
+    @Test fun pruningReturnsTheSameFilterWhenNothingHasToGo() {
+        val filter = TransactionFilter(direction = Direction.ALL, categoryIds = setOf("salary"))
+        assertEquals(filter, TransactionFilters.pruneForDirection(filter, categories))
+    }
+
+    // ---- chip labels ---------------------------------------------------------
+
+    /**
+     * The presets used to ship an income "Other" and an expense "Other", which is what this guard
+     * was written for. Names are unique now, so the clash has to be built by hand, but the guard
+     * stays: a ledger restored from a backup written before the rename still carries the pair, and
+     * two identical chips are indistinguishable from one that does not work.
+     */
+    @Test fun twoCategoriesSharingAnameAreToldApart() {
+        val clashing = categories.map {
+            when (it.id) {
+                Categories.OTHER_EXPENSE, Categories.OTHER_INCOME -> it.copy(name = "Other")
+                else -> it
+            }
+        }
+        val expense = clashing.first { it.id == Categories.OTHER_EXPENSE }
+        val income = clashing.first { it.id == Categories.OTHER_INCOME }
+
+        assertEquals("Other (expense)", TransactionFilters.labelFor(clashing, expense))
+        assertEquals("Other (income)", TransactionFilters.labelFor(clashing, income))
+    }
+
+    @Test fun theshippedEscapeHatchesNoLongerNeedTellingApart() {
+        val expense = categories.first { it.id == Categories.OTHER_EXPENSE }
+        val income = categories.first { it.id == Categories.OTHER_INCOME }
+
+        assertEquals("Other expense", TransactionFilters.labelFor(categories, expense))
+        assertEquals("Other income", TransactionFilters.labelFor(categories, income))
+    }
+
+    @Test fun anUnambiguousNameIsLeftAlone() {
+        val groceries = categories.first { it.id == "groceries" }
+        assertEquals("Groceries", TransactionFilters.labelFor(categories, groceries))
+    }
+
+    @Test fun aNameIsUnambiguousOnceTheOtherOneIsFilteredOutByDirection() {
+        val clashing = categories.map {
+            when (it.id) {
+                Categories.OTHER_EXPENSE, Categories.OTHER_INCOME -> it.copy(name = "Other")
+                else -> it
+            }
+        }
+        val expenseOnly = TransactionFilters.selectableCategories(clashing, Direction.EXPENSE)
+        val other = expenseOnly.first { it.id == Categories.OTHER_EXPENSE }
+
+        assertEquals("Other", TransactionFilters.labelFor(expenseOnly, other))
+    }
+
+    // ---- surviving the app lock and process death ----------------------------
+
+    @Test fun aFullyPopulatedFilterSurvivesARoundTrip() {
+        val filter = TransactionFilter(
+            direction = Direction.EXPENSE,
+            categoryIds = setOf("groceries", null, "transport"),
+            range = DateRange.CUSTOM,
+            customFrom = LocalDate.of(2026, 3, 1),
+            customTo = LocalDate.of(2026, 9, 19),
+            minMinor = 1_000,
+            maxMinor = 500_000,
+            query = "seoudi roxy",
+            sortBy = SortBy.LARGEST,
+            includeAnchors = true,
+        )
+
+        assertEquals(filter, TransactionFilters.restore(TransactionFilters.save(filter)))
+    }
+
+    @Test fun theDefaultFilterSurvivesARoundTrip() {
+        val filter = TransactionFilter()
+        assertEquals(filter, TransactionFilters.restore(TransactionFilters.save(filter)))
+    }
+
+    @Test fun aQueryContainingTheNullSentinelDoesNotCorruptTheCategories() {
+        val filter = TransactionFilter(query = " ", categoryIds = setOf(null))
+        assertEquals(filter, TransactionFilters.restore(TransactionFilters.save(filter)))
+    }
+
+    @Test fun anUnreadableSavedFilterFallsBackToTheDefault() {
+        // A stored enum name that a later build no longer has must not crash the resume.
+        assertEquals(TransactionFilter(), TransactionFilters.restore(listOf("nonsense")))
+        assertEquals(
+            TransactionFilter(),
+            TransactionFilters.restore(
+                listOf("SIDEWAYS", "ANY", "NEWEST", "false", "", "", "", "", "")
+            ),
+        )
+    }
 }

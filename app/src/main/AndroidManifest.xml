@@ -3,10 +3,31 @@
 
     <!-- SMS reading. Not a default-SMS-app; RECEIVE_SMS lets us read incoming texts only. -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <!--
+      Reading messages that already arrived, so transactions missed while the app was not running
+      can be recovered. Asked for only when "Scan past messages" is tapped, never at startup, and
+      the app works without it: everything else here needs RECEIVE_SMS alone.
+    -->
+    <uses-permission android:name="android.permission.READ_SMS" />
     <!-- So the notification listener can survive Doze / battery optimisation. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Budget milestone alerts only. Requested when a budget is first set, not at app start. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+      So the evening "still to categorise" reminder survives a reboot. A reboot clears every alarm
+      an app has set, and without this the reminder would stay silent until the app was next opened.
+      Deliberately NOT SCHEDULE_EXACT_ALARM: the reminder is inexact, so it needs no such grant.
+    -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!--
+      Writing the automatic backup into Download/InstaBalance. From API 29 an app may write there
+      with no permission at all, which is why this is capped at 28: on anything current the app asks
+      for nothing, and on older phones it is the only way to put a file somewhere that survives the
+      app being uninstalled.
+    -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <application
         android:name=".App"
@@ -44,6 +65,37 @@
             android:permission="android.permission.BROADCAST_SMS">
             <intent-filter android:priority="999">
                 <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+          Handles the category buttons on a triage notification. Not exported: the only thing that
+          may fire it is the PendingIntent this app put in its own notification, and an exported
+          receiver here would let any app on the phone file your transactions.
+        -->
+        <receiver
+            android:name=".TriageActionReceiver"
+            android:exported="false" />
+
+        <!--
+          The evening reminder's alarm, and the reboot re-arm. Exported so the system can deliver
+          BOOT_COMPLETED; the alarm itself arrives on an explicit PendingIntent, and the receiver
+          reads the ledger and posts a notification rather than changing anything.
+        -->
+        <receiver
+            android:name=".ReminderReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- The scheduled encrypted backup, and its reboot re-arm. -->
+        <receiver
+            android:name=".AutoBackupReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
 

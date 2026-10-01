@@ -227,6 +227,9 @@ private fun InboxRow(
     val suggestion = MerchantRules.match(data.merchantRules, entry.merchant)?.categoryId
     val quick = buildList {
         suggestion?.let { add(it) }
+        // Before the recents: for a transfer that names nobody, what you did last time with this
+        // exact amount is a better guess than what you happened to file most recently.
+        addAll(amountTwinCategoryIds(data.entries, entry))
         addAll(recent)
         add(if (entry.type == EntryType.CREDIT) Categories.OTHER_INCOME else Categories.OTHER_EXPENSE)
     }.distinct()
@@ -242,7 +245,7 @@ private fun InboxRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        entry.displayCounterparty(),
+                        entry.displayCounterparty(data.merchantRules),
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -280,6 +283,34 @@ private fun InboxRow(
             }
         }
     }
+}
+
+/**
+ * Categories you have filed this exact amount under before, newest first.
+ *
+ * An InstaPay transfer seen as a bank SMS names nobody, so merchant rules can never reach it and
+ * every single one has to be filed by hand. The amount is the only thing left to recognise it by,
+ * and for the transfers that repeat (the rent, the same standing payment to the same person) it is
+ * enough: you filed 3,500.00 as Rent last month, so this month's 3,500.00 offers Rent first.
+ *
+ * Deliberately narrow. Only entries that name nobody ([namesNobody], so the bank's "**" counts as
+ * the blank it is), which keeps a coincidental 500.00 at a shop from suggesting anything, and only
+ * ones filed by hand, so this suggests your own past decisions rather than compounding a rule's
+ * guess. The amount has to match to the piastre, which is what keeps a round number from matching
+ * everything.
+ */
+internal fun amountTwinCategoryIds(entries: List<Entry>, entry: Entry, limit: Int = 2): List<String> {
+    if (entry.type == EntryType.ANCHOR || !namesNobody(entry.merchant)) return emptyList()
+    return entries.asSequence()
+        .filter { it.id != entry.id }
+        .filter { it.type == entry.type && it.amountMinor == entry.amountMinor }
+        .filter { namesNobody(it.merchant) }
+        .filter { it.categoryId != null && !it.categoryFromRule }
+        .sortedByDescending { it.timestamp }
+        .mapNotNull { it.categoryId }
+        .distinct()
+        .take(limit)
+        .toList()
 }
 
 /** The three categories most recently chosen by hand, newest first. */

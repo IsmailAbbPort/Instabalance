@@ -1,6 +1,7 @@
 package com.instabalance
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -43,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -97,9 +99,10 @@ internal fun CategoriesScreen(onBack: () -> Unit) {
                     EntryType.CREDIT -> CategoryKind.INCOME
                     else -> CategoryKind.EXPENSE
                 }
-                val section = data.categories.filter {
-                    it.kind == wanted || it.kind == CategoryKind.BOTH
-                }
+                // Hidden ones are listed here too, this being the screen that unhides them.
+                val section = Categories.byName(
+                    data.categories.filter { it.kind == wanted || it.kind == CategoryKind.BOTH }
+                )
 
                 item(key = "header_$heading") {
                     Text(
@@ -136,6 +139,7 @@ internal fun CategoriesScreen(onBack: () -> Unit) {
         Categories.byId(data.categories, id)?.let { category ->
             CategoryEditSheet(
                 category = category,
+                categories = data.categories,
                 entryCount = Categories.entryCount(data.entries, id),
                 // A category's own colour is not "taken" as far as it is concerned.
                 takenColours = Categories.takenColours(data.categories, excludingId = id),
@@ -146,6 +150,7 @@ internal fun CategoriesScreen(onBack: () -> Unit) {
 
     if (creating) {
         NewCategorySheet(
+            categories = data.categories,
             takenColours = Categories.takenColours(data.categories),
             onDismiss = { creating = false },
         )
@@ -154,7 +159,11 @@ internal fun CategoriesScreen(onBack: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun NewCategorySheet(takenColours: Set<Int>, onDismiss: () -> Unit) {
+private fun NewCategorySheet(
+    categories: List<Category>,
+    takenColours: Set<Int>,
+    onDismiss: () -> Unit,
+) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var name by remember { mutableStateOf("") }
     var kind by remember { mutableStateOf(CategoryKind.EXPENSE) }
@@ -167,6 +176,8 @@ private fun NewCategorySheet(takenColours: Set<Int>, onDismiss: () -> Unit) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
         ) {
+            val clash = Categories.nameTaken(categories, name)
+
             Text("New category", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
@@ -174,6 +185,10 @@ private fun NewCategorySheet(takenColours: Set<Int>, onDismiss: () -> Unit) {
                 onValueChange = { name = it },
                 label = { Text("Name") },
                 singleLine = true,
+                isError = clash,
+                supportingText = if (clash) {
+                    { Text(duplicateNameMessage(categories, name)) }
+                } else null,
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -220,7 +235,7 @@ private fun NewCategorySheet(takenColours: Set<Int>, onDismiss: () -> Unit) {
             Spacer(Modifier.height(20.dp))
             Row {
                 TextButton(
-                    enabled = name.isNotBlank(),
+                    enabled = name.isNotBlank() && !clash,
                     onClick = {
                         LedgerRepository.addCategory(name, kind, colour)
                         onDismiss()
@@ -264,12 +279,16 @@ private fun CategoryRow(category: Category, onEdit: () -> Unit, onToggleHidden: 
 @Composable
 private fun CategoryEditSheet(
     category: Category,
+    categories: List<Category>,
     entryCount: Int,
     takenColours: Set<Int>,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var name by remember(category.id) { mutableStateOf(category.name) }
+    var limit by remember(category.id) {
+        mutableStateOf(category.budgetMinor?.let { Money.formatMinor(it) }.orEmpty())
+    }
     var confirmDelete by remember { mutableStateOf(false) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -284,12 +303,18 @@ private fun CategoryEditSheet(
                 style = MaterialTheme.typography.titleMedium,
             )
             Spacer(Modifier.height(12.dp))
+            // Its own name is not a clash with itself, which is why the id is excluded.
+            val clash = Categories.nameTaken(categories, name, excludingId = category.id)
             if (!category.preset) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("Name") },
                     singleLine = true,
+                    isError = clash,
+                    supportingText = if (clash) {
+                        { Text(duplicateNameMessage(categories, name, excludingId = category.id)) }
+                    } else null,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -342,13 +367,54 @@ private fun CategoryEditSheet(
                         },
                     )
                 }
+
+                // Its own limit, separate from whether it counts toward the overall one: an
+                // investment pot can be outside the budget and still have a ceiling of its own.
+                Spacer(Modifier.height(16.dp))
+                Text("Limit for this category", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "One alert when you go over it in a month, and nothing before that. Blank for " +
+                        "no limit.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = limit,
+                    onValueChange = { limit = sanitizeAmount(it) },
+                    label = { Text("EGP per month") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                )
+                val blankLimit = limit.isBlank()
+                val parsedLimit = if (blankLimit) null else Money.parseToMinor(limit)
+                if (!blankLimit && parsedLimit == null) {
+                    Text(
+                        "That is not an amount.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
 
             Spacer(Modifier.height(20.dp))
             Row {
-                TextButton(onClick = {
+                TextButton(enabled = !clash, onClick = {
                     if (!category.preset && name.isNotBlank()) {
                         LedgerRepository.renameCategory(category.id, name)
+                    }
+                    if (category.kind != CategoryKind.INCOME) {
+                        // A blank field is "no limit"; an unparseable one is a typo and is left
+                        // alone rather than quietly turning the limit off.
+                        val typed = limit.trim()
+                        if (typed.isEmpty()) {
+                            LedgerRepository.setCategoryBudget(category.id, null)
+                        } else {
+                            Money.parseToMinor(typed)?.let {
+                                LedgerRepository.setCategoryBudget(category.id, it)
+                            }
+                        }
                     }
                     onDismiss()
                 }) { Text("Done") }
@@ -392,6 +458,29 @@ private fun CategoryEditSheet(
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
     }
+}
+
+/**
+ * Names the category the typed name collides with, and which side it is on.
+ *
+ * "You already have a category called that" would be true and useless when the clash is with an
+ * income category and you are halfway down the expense list looking for it.
+ */
+internal fun duplicateNameMessage(
+    categories: List<Category>,
+    name: String,
+    excludingId: String? = null,
+): String {
+    val wanted = name.trim().lowercase()
+    val other = categories.firstOrNull {
+        it.id != excludingId && it.name.trim().lowercase() == wanted
+    } ?: return "That name is already in use."
+    val where = when (other.kind) {
+        CategoryKind.EXPENSE -> "an expense category"
+        CategoryKind.INCOME -> "an income category"
+        CategoryKind.BOTH -> "a category used for both"
+    }
+    return "You already have $where called ${other.name}."
 }
 
 /**

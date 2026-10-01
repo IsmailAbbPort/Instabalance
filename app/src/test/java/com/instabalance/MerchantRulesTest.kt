@@ -84,6 +84,29 @@ class MerchantRulesTest {
         assertEquals("ISMAILABB@INSTAPAY", MerchantRules.proposePattern("ismailabb@instapay"))
     }
 
+    @Test fun proposesTwoTokensForMisrBecauseMisrMeansEgypt() {
+        // "MISR" alone would file Banque Misr and Misr Insurance under petrol.
+        assertEquals(
+            "MISR PETROLEUM",
+            MerchantRules.proposePattern("MISR PETROLEUM со CAIRO"),
+        )
+    }
+
+    @Test fun aRuleOnMisrPetroleumDoesNotCatchBanqueMisr() {
+        val rules = listOf(rule("MISR PETROLEUM", "transport"))
+        assertEquals("transport", MerchantRules.match(rules, "MISR PETROLEUM CAIRO")?.categoryId)
+        assertNull(MerchantRules.match(rules, "BANQUE MISR"))
+    }
+
+    @Test fun bothChillOutSpellingsNeedTheirOwnRule() {
+        // The bank writes it "CHILL OUT" and "CHILLOUT". A contains match cannot bridge the space,
+        // so one rule for each, which is also why a single "CHILL" was rejected: it would file a
+        // chilli restaurant as petrol.
+        val rules = listOf(rule("CHILL OUT", "transport"), rule("CHILLOUT", "transport"))
+        assertEquals("transport", MerchantRules.match(rules, "CHILL OUT GARDINYA SCAIRO N 07")?.categoryId)
+        assertEquals("transport", MerchantRules.match(rules, "CHILLOUT NAFAQ ELOBOURCAIRO")?.categoryId)
+    }
+
     @Test fun atmProposesItselfEvenThoughItIsShort() {
         // Only three characters, but there is no second token to fall back to, and one rule for
         // every ATM withdrawal is exactly what makes cash usable.

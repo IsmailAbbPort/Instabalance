@@ -153,4 +153,100 @@ object TransactionFilters {
         incomeMinor = entries.filter { it.type == EntryType.CREDIT }.sumOf { it.amountMinor },
         expenseMinor = entries.filter { it.type == EntryType.DEBIT }.sumOf { it.amountMinor },
     )
+
+    /**
+     * The category chips worth offering for a direction. Showing an income category while the
+     * direction is Expenses offers a combination that can only ever match nothing, which reads as
+     * a broken filter rather than as an empty answer.
+     */
+    fun selectableCategories(categories: List<Category>, direction: Direction): List<Category> {
+        val visible = Categories.byName(categories.filter { !it.hidden })
+        return when (direction) {
+            Direction.ALL -> visible
+            Direction.INCOME -> visible.filter { it.kind != CategoryKind.EXPENSE }
+            Direction.EXPENSE -> visible.filter { it.kind != CategoryKind.INCOME }
+        }
+    }
+
+    /**
+     * Drops category ids that [selectableCategories] no longer offers. Without this, switching to
+     * Expenses leaves an income category silently selected: the chip is gone, the badge says a
+     * filter is active, and the list is empty for a reason nothing on screen can explain.
+     */
+    fun pruneForDirection(filter: TransactionFilter, categories: List<Category>): TransactionFilter {
+        if (filter.categoryIds.isEmpty()) return filter
+        val allowed = selectableCategories(categories, filter.direction).mapTo(mutableSetOf()) { it.id }
+        // null is the uncategorised bucket and is meaningful in every direction.
+        val kept = filter.categoryIds.filter { it == null || it in allowed }.toSet()
+        return if (kept == filter.categoryIds) filter else filter.copy(categoryIds = kept)
+    }
+
+    /**
+     * What to print on a category chip. Two presets are both called "Other", one income and one
+     * expense, and two identical chips side by side is indistinguishable from a chip that does not
+     * work. Only ambiguous names are qualified, so the common case stays clean.
+     */
+    fun labelFor(categories: List<Category>, category: Category): String {
+        val clash = categories.any { it.id != category.id && !it.hidden && it.name == category.name }
+        if (!clash) return category.name
+        return when (category.kind) {
+            CategoryKind.INCOME -> "${category.name} (income)"
+            CategoryKind.EXPENSE -> "${category.name} (expense)"
+            CategoryKind.BOTH -> category.name
+        }
+    }
+
+    // ---- persistence ---------------------------------------------------------
+    //
+    // The filter outlives the app lock and process death, so it has to survive as a Bundle. These
+    // two are the whole of that: pure, so a round trip can be tested without Compose, with the
+    // Compose Saver in the screen doing nothing but calling them.
+
+    /** Stands in for the uncategorised bucket, which is a real selectable value and is null. */
+    private const val NULL_CATEGORY = " "
+
+    private const val FIXED_FIELDS = 9
+
+    fun save(filter: TransactionFilter): List<String> = buildList {
+        add(filter.direction.name)
+        add(filter.range.name)
+        add(filter.sortBy.name)
+        add(filter.includeAnchors.toString())
+        add(filter.query)
+        add(filter.minMinor?.toString() ?: "")
+        add(filter.maxMinor?.toString() ?: "")
+        add(filter.customFrom?.toString() ?: "")
+        add(filter.customTo?.toString() ?: "")
+        filter.categoryIds.forEach { add(it ?: NULL_CATEGORY) }
+    }
+
+    /**
+     * Anything unreadable falls back to the default filter rather than throwing. A saved filter is
+     * a convenience; losing it is a small annoyance, and crashing on resume because a stored enum
+     * name no longer exists is not.
+     */
+    fun restore(saved: List<String>): TransactionFilter {
+        if (saved.size < FIXED_FIELDS) return TransactionFilter()
+        return try {
+            TransactionFilter(
+                direction = Direction.valueOf(saved[0]),
+                range = DateRange.valueOf(saved[1]),
+                sortBy = SortBy.valueOf(saved[2]),
+                includeAnchors = saved[3].toBooleanStrict(),
+                query = saved[4],
+                minMinor = saved[5].toLongOrNull(),
+                maxMinor = saved[6].toLongOrNull(),
+                customFrom = saved[7].toLocalDateOrNull(),
+                customTo = saved[8].toLocalDateOrNull(),
+                categoryIds = saved.drop(FIXED_FIELDS)
+                    .map { if (it == NULL_CATEGORY) null else it }
+                    .toSet(),
+            )
+        } catch (e: IllegalArgumentException) {
+            TransactionFilter()
+        }
+    }
+
+    private fun String.toLocalDateOrNull(): LocalDate? =
+        if (isEmpty()) null else runCatching { LocalDate.parse(this) }.getOrNull()
 }

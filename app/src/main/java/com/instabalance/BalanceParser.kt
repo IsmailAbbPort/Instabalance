@@ -38,7 +38,12 @@ object BalanceParser {
         val minor = findAmount(withoutBalance, config) ?: return null
         if (minor <= 0) return null
 
-        return ParsedTxn(type, minor, findMerchant(text, withoutBalance, config))
+        return ParsedTxn(
+            type = type,
+            amountMinor = minor,
+            merchant = findMerchant(text, withoutBalance, config),
+            reportedBalanceMinor = findReportedBalance(text, config),
+        )
     }
 
     /**
@@ -63,17 +68,45 @@ object BalanceParser {
         }
     }
 
+    private fun balanceClauseRegex(label: String, config: SmsConfig): Regex {
+        val currency = currencyAlternation(config)
+        return Regex(
+            """${Regex.escape(label)}\s*:?\s*(?:$currency)?\s*($NUMBER)\s*(?:$currency)?""",
+            RegexOption.IGNORE_CASE,
+        )
+    }
+
     private fun stripBalanceClauses(text: String, config: SmsConfig): String {
         var out = text
-        val currency = currencyAlternation(config)
         config.balanceLabels.filter { it.isNotBlank() }.forEach { label ->
-            val re = Regex(
-                """${Regex.escape(label)}\s*:?\s*(?:$currency)?\s*$NUMBER\s*(?:$currency)?""",
-                RegexOption.IGNORE_CASE,
-            )
-            out = out.replace(re, " ")
+            out = out.replace(balanceClauseRegex(label, config), " ")
         }
         return out
+    }
+
+    /**
+     * The balance the message itself reports, where it carries one.
+     *
+     * The clause is already being found, to keep the remaining balance from being read as the size
+     * of the purchase. This only stops throwing the number away: the bank is telling you what the
+     * account holds, which is the exact figure the manual re-sync exists to go and fetch by hand.
+     *
+     * The longest label is tried first, because the defaults include labels that are prefixes of
+     * other labels ("الرصيد" and "الرصيد المتاح"). Whichever matches, it must be the same number
+     * [stripBalanceClauses] removed, or the amount and the balance would come from different
+     * readings of one sentence.
+     */
+    private fun findReportedBalance(text: String, config: SmsConfig): Long? {
+        config.balanceLabels
+            .filter { it.isNotBlank() }
+            .sortedByDescending { it.length }
+            .forEach { label ->
+                balanceClauseRegex(label, config).find(text)?.let { m ->
+                    val minor = Money.parseToMinor(m.groupValues[1])
+                    if (minor != null && minor > 0) return minor
+                }
+            }
+        return null
     }
 
     /**
@@ -105,21 +138,37 @@ object BalanceParser {
     private val structural = setOf("حساب", "الكارت", "رقم", "account", "card", "no", "ref")
 
     /**
+     * The bank's own tag, "[EGBANK]", which it inserts wherever the message happens to be assembled,
+     * including between the masked card number and its last four digits. Removed before the shop is
+     * looked for, or the card-purchase shape below never matches a real message.
+     */
+    private val BANK_TAG = Regex("""\[[^\[\]\n]{1,24}\]""")
+
+    /**
      * The other party, where the message names one. Card purchases do; an InstaPay transfer seen as
      * a bank SMS does not, and that is a fact about the message rather than a gap here.
      *
      * Never able to fail a transaction: the amount and direction are the money, this is a
      * convenience for the category rules.
      */
-    private fun findMerchant(full: String, withoutBalance: String, config: SmsConfig): String? {
+    private fun findMerchant(fullRaw: String, withoutBalanceRaw: String, config: SmsConfig): String? {
+        val full = fullRaw.replace(BANK_TAG, " ")
+        val withoutBalance = withoutBalanceRaw.replace(BANK_TAG, " ")
+
         // An address wins outright: it is unambiguous and it is the whole counterparty.
         Regex("""\b(?:from|to)\s+(\S+@\S+)""", RegexOption.IGNORE_CASE).find(full)
             ?.let { return clean(it.groupValues[1]) }
 
         // A card purchase names the shop as the rest of the line after the card number.
-        Regex("""(?:الكارت|card)\s*(?:رقم|no\.?|#)?\s*[+*x0-9]+\s*(?:من|from|at)\s+(.+)$""",
-            RegexOption.IGNORE_CASE).find(full)
-            ?.let { return clean(it.groupValues[1]) }
+        //
+        // The card number is matched as several runs, because the bank breaks it across a line
+        // ("++" then "0954"). The shop is then everything to the end of ITS line: `\s*` reaches
+        // across the blank lines to find it, and `.` not matching a newline is what stops the
+        // capture before a balance sentence printed underneath.
+        Regex(
+            """(?:الكارت|card)\s*(?:رقم|no\.?|#)?\s*[+*x0-9]+(?:\s+[+*x0-9]+)*\s*(?:من|from|at)\s*(.+)""",
+            RegexOption.IGNORE_CASE,
+        ).find(full)?.let { m -> clean(m.groupValues[1])?.let { return it } }
 
         Regex("""\bfrom\s+(.+?)(?:\s+for\s+details\b|\s+IPN\b|$)""", RegexOption.IGNORE_CASE)
             .find(full)?.let { m -> clean(m.groupValues[1])?.let { return it } }

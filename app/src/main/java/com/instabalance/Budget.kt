@@ -32,9 +32,32 @@ data class BudgetStatus(
  * repurchase into two notifications for the same threshold), and lowering your limit mid-month
  * does not retro-fire everything below the new figure.
  */
+/** One category's own limit and what it has used of it this month. */
+data class CategoryBudgetStatus(
+    val category: Category,
+    val spentMinor: Long,
+    val limitMinor: Long,
+) {
+    val percent: Int get() =
+        if (limitMinor <= 0L) 0
+        else Math.round(spentMinor.toDouble() / limitMinor.toDouble() * 100.0).toInt()
+
+    val overspent: Boolean get() = spentMinor > limitMinor
+}
+
 object Budget {
 
     val MILESTONES = listOf(25, 50, 75, 90, 100, 120)
+
+    /**
+     * A category gets one alert a month, when it goes over, and that is the whole ladder.
+     *
+     * The monthly budget runs six milestones because there is exactly one of it. Running six per
+     * category would mean up to six alerts times however many categories have a limit, which is how
+     * a channel gets muted, and a muted channel takes the monthly budget's alerts down with it.
+     * Passing the limit is the moment that actually means something.
+     */
+    val CATEGORY_MILESTONES = listOf(100)
 
     /** Highest milestone at or below the current percentage, or 0 when under the first one. */
     fun reachedMilestone(spentMinor: Long, budgetMinor: Long): Int {
@@ -78,6 +101,55 @@ object Budget {
             excludedMinor = excluded,
         )
     }
+
+    /** Same shape as [reachedMilestone], against the shorter category ladder. */
+    fun categoryReached(spentMinor: Long, limitMinor: Long): Int {
+        if (limitMinor <= 0L || spentMinor <= 0L) return 0
+        val percent = spentMinor.toDouble() / limitMinor.toDouble() * 100.0
+        return CATEGORY_MILESTONES.lastOrNull { it <= percent } ?: 0
+    }
+
+    fun categoryMilestoneToFire(spentMinor: Long, limitMinor: Long, highestFired: Int): Int? =
+        categoryReached(spentMinor, limitMinor).takeIf { it > highestFired }
+
+    /**
+     * What survives into [month] of the per-category fired state stored against [storedMonth].
+     *
+     * Its own function because two separate places consult it inside one lock, the monthly
+     * evaluation and the category one, and the monthly evaluation writes the month stamp first.
+     * Left inline, the second would see a month it considers current and keep last month's state
+     * forever, so a category limit could fire once and then never again.
+     */
+    fun carryOverCategoryMilestones(
+        storedMonth: String,
+        month: String,
+        stored: Map<String, Int>,
+    ): Map<String, Int> = if (storedMonth == month) stored else emptyMap()
+
+    /**
+     * Every category that has set itself a limit, worst first, so the one you are about to blow is
+     * the one you see. Categories with no limit are absent rather than shown at zero.
+     */
+    fun categoryStatuses(
+        entries: List<Entry>,
+        categories: List<Category>,
+        now: Instant,
+        zone: ZoneId,
+    ): List<CategoryBudgetStatus> {
+        val spent = Insights.spentInMonthByCategory(entries, now, zone)
+        return categories
+            .filter { !it.hidden }
+            .mapNotNull { c ->
+                val limit = c.budgetMinor?.takeIf { it > 0L } ?: return@mapNotNull null
+                CategoryBudgetStatus(c, spent[c.id] ?: 0L, limit)
+            }
+            .sortedWith(compareByDescending<CategoryBudgetStatus> { it.percent }.thenBy { it.category.name })
+    }
+
+    fun categoryTitle(category: Category): String = "${category.name} is over budget"
+
+    fun categoryBody(status: CategoryBudgetStatus): String =
+        "EGP ${Money.formatMinor(status.spentMinor)} of ${Money.formatMinor(status.limitMinor)} this month"
 
     fun title(milestone: Int): String = when (milestone) {
         25 -> "Quarter of your budget used"

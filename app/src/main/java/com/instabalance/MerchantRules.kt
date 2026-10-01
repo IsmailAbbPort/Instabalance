@@ -15,12 +15,25 @@ data class MerchantRule(
     val pattern: String,
     val categoryId: String,
     val createdAt: Long,
+    /**
+     * What to call this shop on screen, where the bank's own string is not worth reading:
+     * "UBER TRIP HELP.UBER.COM", "PAYMOB RAF SPECIALIT CAIRO N 07". Null keeps the raw string, which
+     * is right for the many merchants whose name the bank already prints plainly.
+     *
+     * Only ever changes what is displayed. The rule still matches on [pattern], and searching still
+     * looks at what the message actually said, so renaming can never hide a transaction from you.
+     */
+    val label: String? = null,
 )
 
 object MerchantRules {
 
-    /** Tokens too generic to be a rule on their own; they would match half the ledger. */
-    private val STOP_WORDS = setOf("NEW", "THE", "FOR", "AND", "EL", "AL", "ABU", "MR", "CO")
+    /**
+     * Tokens too generic to be a rule on their own; they would match half the ledger. MISR is
+     * Egypt: it opens Misr Petroleum, Banque Misr, Misr Insurance and a hundred shop names, so a
+     * rule on it alone would file a bank transfer under petrol.
+     */
+    private val STOP_WORDS = setOf("NEW", "THE", "FOR", "AND", "EL", "AL", "ABU", "MR", "CO", "MISR")
 
     private val PUNCTUATION = Regex("""[^A-Z0-9@. ]""")
     private val WHITESPACE = Regex("""\s+""")

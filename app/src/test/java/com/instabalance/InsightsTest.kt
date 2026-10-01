@@ -118,6 +118,119 @@ class InsightsTest {
         assertEquals(slices, Insights.topN(slices, 7))
     }
 
+    // ---- rollUp: the same thing, keeping what it folded away ------------------
+
+    @Test fun theTailIsEveryCategoryTheRollUpStandsFor() {
+        val slices = (1..10).map { Slice("c$it", (11 - it) * 1000L) }
+
+        val out = Insights.rollUp(slices, 3)
+
+        assertEquals(listOf("c4", "c5", "c6", "c7", "c8", "c9", "c10"), out.tail.map { it.categoryId })
+        // Opening the legend row must account for exactly the number printed on it.
+        assertEquals(
+            out.visible.first { it.categoryId == Insights.OTHER_ROLLUP }.amountMinor,
+            out.tail.sumOf { it.amountMinor },
+        )
+    }
+
+    @Test fun theTailKeepsTheLargestFirstOrderOfTheSlicesItCameFrom() {
+        val slices = (1..10).map { Slice("c$it", (11 - it) * 1000L) }
+
+        val tail = Insights.rollUp(slices, 3).tail
+
+        assertEquals(tail.sortedByDescending { it.amountMinor }, tail)
+    }
+
+    @Test fun thereIsNothingToOpenWhenNothingWasRolledUp() {
+        val slices = listOf(Slice("a", 100), Slice(null, 50))
+
+        val out = Insights.rollUp(slices, 7)
+
+        assertEquals(slices, out.visible)
+        assertTrue(out.tail.isEmpty())
+    }
+
+    @Test fun oneLeftOverCategoryIsShownRatherThanRolledUp() {
+        // "Other categories: 1" would replace a real name with a vaguer one and save no space.
+        val slices = (1..11).map { Slice("c$it", (12 - it) * 1000L) }
+
+        val out = Insights.rollUp(slices, 10)
+
+        assertEquals(slices, out.visible)
+        assertTrue(out.tail.isEmpty())
+        assertTrue(out.visible.none { it.categoryId == Insights.OTHER_ROLLUP })
+    }
+
+    @Test fun twoLeftOverCategoriesAreWorthRollingUp() {
+        val slices = (1..12).map { Slice("c$it", (13 - it) * 1000L) }
+
+        val out = Insights.rollUp(slices, 10)
+
+        assertEquals(listOf("c11", "c12"), out.tail.map { it.categoryId })
+        assertEquals(11, out.visible.size)
+        assertEquals(Insights.OTHER_ROLLUP, out.visible.last().categoryId)
+    }
+
+    @Test fun aSingleLeftOverIsShownEvenAlongsideUncategorised() {
+        val slices = (1..11).map { Slice("c$it", (12 - it) * 1000L) } + Slice(null, 500L)
+
+        val out = Insights.rollUp(slices, 10)
+
+        assertEquals(slices, out.visible)
+        assertTrue(out.tail.isEmpty())
+    }
+
+    @Test fun rollingUpNeverChangesTheTotal() {
+        // The ring and the legend both sum these, so a slice counted twice or dropped would make
+        // the centre figure disagree with the rows under it.
+        val slices = (1..14).map { Slice("c$it", (15 - it) * 1000L) } + Slice(null, 700L)
+
+        val out = Insights.rollUp(slices, 10)
+
+        assertEquals(slices.sumOf { it.amountMinor }, out.visible.sumOf { it.amountMinor })
+    }
+
+    @Test fun aTailOfOnlyZeroesDrawsNoRollUpAndOffersNothingToOpen() {
+        // No roll-up slice is drawn for a zero, so a legend row that could be expanded to show
+        // nothing must not appear either.
+        val slices = (1..5).map { Slice("c$it", 1000L) } + (6..9).map { Slice("c$it", 0L) }
+
+        val out = Insights.rollUp(slices, 5)
+
+        assertTrue(out.visible.none { it.categoryId == Insights.OTHER_ROLLUP })
+        assertTrue(out.tail.isEmpty())
+    }
+
+    // ---- axis labels ---------------------------------------------------------
+
+    @Test fun thirtyDaysLabelsEveryThirdBar() {
+        assertEquals(3, Insights.axisLabelStep(30))
+        assertEquals(10, Insights.axisLabelIndices(30).size)
+    }
+
+    @Test fun sixMonthsLabelsEveryBar() {
+        // A fixed "every third" would label two of the six, which is worse than what it replaced.
+        assertEquals(1, Insights.axisLabelStep(6))
+        assertEquals((0..5).toSet(), Insights.axisLabelIndices(6))
+    }
+
+    @Test fun aLongMonthStaysWithinTheLabelBudget() {
+        assertEquals(4, Insights.axisLabelStep(31))
+        assertTrue(Insights.axisLabelIndices(31).size <= 10)
+    }
+
+    @Test fun theMostRecentBarIsAlwaysLabelled() {
+        // Today is the bar you look at first; an axis that stops short of it looks stale.
+        listOf(1, 5, 6, 28, 29, 30, 31, 90).forEach { count ->
+            assertTrue("last bar unlabelled for $count", count - 1 in Insights.axisLabelIndices(count))
+        }
+    }
+
+    @Test fun anEmptyChartHasNoLabels() {
+        assertTrue(Insights.axisLabelIndices(0).isEmpty())
+        assertEquals(1, Insights.axisLabelStep(0))
+    }
+
     // ---- daily / monthly ----------------------------------------------------
 
     @Test fun dailyKeepsEmptyDays() {

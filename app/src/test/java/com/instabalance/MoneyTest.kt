@@ -37,8 +37,37 @@ class MoneyTest {
 
     @Test fun compactShowsWholePoundsUnderAThousand() {
         assertEquals("0", Money.formatCompactMinor(0))
-        assertEquals("7", Money.formatCompactMinor(750))          // 7.50 EGP
+        assertEquals("10", Money.formatCompactMinor(1_050))       // 10.50 EGP
         assertEquals("999", Money.formatCompactMinor(99_999))     // 999.99 EGP
+    }
+
+    /**
+     * A chart axis quartered a maximum of 0.50 EGP and printed "0" five times, because the compact
+     * form divided by 100 in integer arithmetic. Five zeros is not a scale, and the whole axis
+     * stopped saying anything on any day you spent small change.
+     */
+    @Test fun compactKeepsThePiastresWhenThatIsTheWholeFigure() {
+        assertEquals("0.50", Money.formatCompactMinor(50))
+        assertEquals("0.37", Money.formatCompactMinor(37))
+        assertEquals("0.25", Money.formatCompactMinor(25))
+        assertEquals("0.12", Money.formatCompactMinor(12))
+        assertEquals("7.50", Money.formatCompactMinor(750))
+    }
+
+    @Test fun compactStillDropsTrailingZeroes() {
+        // A scale that lands on whole pounds should not grow two digits for nothing.
+        assertEquals("3", Money.formatCompactMinor(300))
+        assertEquals("0", Money.formatCompactMinor(0))
+    }
+
+    @Test fun compactQuartersOfAsmallMaximumAreAllDifferent() {
+        // The actual axis: five labels taken at 0, 25, 50, 75 and 100 percent of the maximum. The
+        // bug was that every one of them came out identical.
+        val max = 50L
+        val labels = listOf(1.0, 0.75, 0.5, 0.25, 0.0)
+            .map { Money.formatCompactMinor((max * it).toLong()) }
+
+        assertEquals(labels.size, labels.distinct().size)
     }
 
     @Test fun compactSwitchesToThousands() {

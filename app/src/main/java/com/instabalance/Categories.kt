@@ -30,6 +30,14 @@ data class Category(
      * credit card repayments are the same problem, and this way you can say so without a new build.
      */
     val excludedFromBudget: Boolean = false,
+    /**
+     * This category's own monthly limit, or null for the usual case of no limit. "Eating out under
+     * 3,000" is a thing people actually enforce, and the single monthly figure cannot express it.
+     *
+     * Independent of [excludedFromBudget]: a category can be left out of the overall budget and
+     * still have a limit of its own, which is exactly right for something like an investment pot.
+     */
+    val budgetMinor: Long? = null,
 )
 
 object Categories {
@@ -64,18 +72,32 @@ object Categories {
         Category(INVESTMENT, "Investment", CategoryKind.EXPENSE, 8, preset = true,
             excludedFromBudget = true),
         Category(FEES, "Fees", CategoryKind.EXPENSE, 2, preset = true),
-        Category(OTHER_EXPENSE, "Other", CategoryKind.EXPENSE, 10, preset = true),
+        Category(OTHER_EXPENSE, "Other expense", CategoryKind.EXPENSE, 10, preset = true),
         Category("family", "Family transfer", CategoryKind.BOTH, 19, preset = true),
         Category("friends", "Friends", CategoryKind.BOTH, 9, preset = true),
         Category("salary", "Salary", CategoryKind.INCOME, 6, preset = true),
         Category("freelance", "Freelance", CategoryKind.INCOME, 3, preset = true),
         Category(REFUND, "Refund", CategoryKind.INCOME, 15, preset = true),
-        Category(OTHER_INCOME, "Other", CategoryKind.INCOME, 5, preset = true),
+        Category(OTHER_INCOME, "Other income", CategoryKind.INCOME, 5, preset = true),
     )
 
     /** Null rather than throwing: a dangling id from a hand-edited file must not crash the app. */
     fun byId(categories: List<Category>, id: String?): Category? =
         if (id == null) null else categories.firstOrNull { it.id == id }
+
+    /**
+     * The order every list of category chips is drawn in.
+     *
+     * Alphabetical, because the alternative is the order they happen to be stored in: presets in
+     * the order this file declares them, then anything you added, in the order you added it. That
+     * is an order only the file knows, so finding a category means reading every chip. Case is
+     * ignored, or a lowercase name you typed would sort below all the presets.
+     *
+     * Deliberately not applied to the inbox's three quick chips: those are ordered by how likely
+     * each is to be right, which is the only thing they have to say.
+     */
+    fun byName(categories: List<Category>): List<Category> =
+        categories.sortedBy { it.name.lowercase() }
 
     /** What a picker offers for a direction. Hidden categories keep their entries but stop appearing. */
     fun visibleFor(categories: List<Category>, type: EntryType): List<Category> {
@@ -85,7 +107,7 @@ object Categories {
             // An anchor is a re-sync, not money moving, so nothing is ever offered for it.
             EntryType.ANCHOR -> return emptyList()
         }
-        return categories.filter { !it.hidden && (it.kind == wanted || it.kind == CategoryKind.BOTH) }
+        return byName(categories.filter { !it.hidden && (it.kind == wanted || it.kind == CategoryKind.BOTH) })
     }
 
     /**
@@ -97,6 +119,21 @@ object Categories {
         val known = categories.mapTo(mutableSetOf()) { it.id }
         val missing = PRESETS.filterNot { it.id in known }
         return if (missing.isEmpty()) categories else categories + missing
+    }
+
+    /**
+     * Whether [name] already belongs to a category, ignoring case and surrounding space.
+     *
+     * Across every kind, not within one. Income and expense categories meet in the same lists (the
+     * ring's legend, a rule's target, a search), and nothing there says which direction a name came
+     * from, so two categories called "Rent" would be indistinguishable in all of them. Pass the id
+     * being edited as [excludingId], or renaming a category to the name it already has is a clash
+     * with itself.
+     */
+    fun nameTaken(categories: List<Category>, name: String, excludingId: String? = null): Boolean {
+        val wanted = name.trim().lowercase()
+        if (wanted.isEmpty()) return false
+        return categories.any { it.id != excludingId && it.name.trim().lowercase() == wanted }
     }
 
     /**
@@ -121,6 +158,9 @@ object Categories {
      * the requested colour is used as-is: refusing to create the category would be worse.
      */
     fun add(categories: List<Category>, name: String, kind: CategoryKind, colorIndex: Int): List<Category> {
+        // Returns the list unchanged on a duplicate name, the same way [recolour] does on a taken
+        // colour. The sheet already blocks the button; this is so no other caller can get round it.
+        if (name.isBlank() || nameTaken(categories, name)) return categories
         val colour = if (colorIndex in takenColours(categories)) {
             firstFreeColour(categories) ?: colorIndex
         } else {
@@ -139,10 +179,12 @@ object Categories {
      * references one by id ([FEES], [CASH], the two [OTHER_EXPENSE]/[OTHER_INCOME] escape hatches)
      * keeps describing what it actually does. Returns the list unchanged for a preset.
      */
-    fun rename(categories: List<Category>, id: String, name: String): List<Category> =
-        categories.map {
+    fun rename(categories: List<Category>, id: String, name: String): List<Category> {
+        if (name.isBlank() || nameTaken(categories, name, excludingId = id)) return categories
+        return categories.map {
             if (it.id == id && !it.preset) it.copy(name = name.trim()) else it
         }
+    }
 
     /**
      * Every category can be recoloured, presets included, but never onto a colour another category

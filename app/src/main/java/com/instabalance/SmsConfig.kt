@@ -15,8 +15,15 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class SmsConfig(
-    /** Senders to read. Empty means read every sender, which is the old behaviour. */
-    val senders: List<String> = emptyList(),
+    /**
+     * Senders to read. Empty means read every sender, which is what a fresh install used to do and
+     * is still a real choice for anyone on a bank these defaults do not know.
+     *
+     * Defaulting to the bank rather than to everyone, because "read everyone" means every shortcode
+     * in the country gets parsed, and an ad for a sandwich at 175 EGP has a number, a currency and
+     * the word خصم in it. That reads as a purchase, and a wrong purchase is worse than a missed one.
+     */
+    val senders: List<String> = DEFAULT_SENDERS,
     /** Words meaning money arrived. */
     val creditWords: List<String> = DEFAULT_CREDIT,
     /** Words meaning money left. */
@@ -39,6 +46,9 @@ data class SmsConfig(
     val ignoreWords: List<String> = DEFAULT_IGNORE,
 ) {
     companion object {
+        /** EGBANK's sender ID. One entry, because this is the bank the defaults below describe. */
+        val DEFAULT_SENDERS = listOf("EGBANK")
+
         val DEFAULT_CREDIT = listOf("credited", "received", "ايداع", "إيداع", "اضافة", "إضافة")
         val DEFAULT_DEBIT = listOf(
             "charged", "debited", "sent", "paid", "شراء", "سحب", "خصم",
@@ -50,7 +60,16 @@ data class SmsConfig(
             "الرصيد المتاح", "الرصيد", "available balance", "avail bal", "balance is",
         )
         val DEFAULT_MERCHANT_LABELS = listOf("من", "from", "to", "at")
-        val DEFAULT_IGNORE = listOf("otp", "one time password", "رمز التحقق", "كود التحقق")
+        /**
+         * A link is the tell. Every real EGBANK transaction message is a statement of fact with a
+         * reference number; the ones carrying a short link are selling something, and an ad with a
+         * price in it parses as cleanly as a purchase does. Kept here rather than as a rule in the
+         * parser so it is visible and removable, like every other word the parser keys on.
+         */
+        val DEFAULT_LINK_WORDS = listOf("http", "www.")
+
+        val DEFAULT_IGNORE =
+            listOf("otp", "one time password", "رمز التحقق", "كود التحقق") + DEFAULT_LINK_WORDS
     }
 
     /** True when this sender should be read at all. An empty allowlist reads everyone. */

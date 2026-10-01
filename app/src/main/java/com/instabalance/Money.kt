@@ -36,13 +36,21 @@ object Money {
         return Math.round(v * 100).toInt()
     }
 
+    /**
+     * Whole pounds above ten, because that is all a chart axis has room for and all it needs to
+     * say. Below ten, the piastres are the figure: a day where you spent 0.50 drew an axis of five
+     * zeros, which is not a scale, it is a wall. Trailing ".00" is still dropped, so a scale that
+     * happens to land on whole pounds does not grow two digits for nothing.
+     */
     fun formatCompactMinor(minor: Long): String {
-        val pounds = kotlin.math.abs(minor) / 100
+        val abs = kotlin.math.abs(minor)
+        val pounds = abs / 100
         val sign = if (minor < 0) "-" else ""
         return when {
             pounds >= 1_000_000 -> "$sign${pounds / 1_000_000}.${(pounds % 1_000_000) / 100_000}m"
             pounds >= 1_000 -> "$sign${pounds / 1_000}.${(pounds % 1_000) / 100}k"
-            else -> "$sign$pounds"
+            pounds >= 10 || abs % 100 == 0L -> "$sign$pounds"
+            else -> sign + "%.2f".format(abs / 100.0)
         }
     }
 

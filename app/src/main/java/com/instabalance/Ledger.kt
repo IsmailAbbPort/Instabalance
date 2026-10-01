@@ -69,6 +69,49 @@ data class LedgerData(
     val monthlyBudgetMinor: Long? = null,   // null = no budget, no alerts
     val budgetMonth: String = "",           // "2026-09": the month highestMilestoneFired belongs to
     val highestMilestoneFired: Int = 0,     // 0, 25, 50, 75, 90, 100 or 120
+    /**
+     * Per-category equivalent of [highestMilestoneFired], keyed by category id, and reset by the
+     * same [budgetMonth]. Absent means nothing has fired for that category this month.
+     */
+    val categoryMilestones: Map<String, Int> = emptyMap(),
+    /**
+     * Highest [Migration.SEEDED_RULE_VERSION] whose shipped merchant rules have been offered to
+     * this ledger. Zero on a file written before they existed. Without it, deleting a rule the app
+     * ships would only last until the next launch.
+     */
+    val seededRuleVersion: Int = 0,
+    /**
+     * Whether a captured transaction nobody could file for you offers to be filed from the
+     * notification shade. On by default: the channel is silent, and the moment you know what a
+     * nameless transfer was is the moment it lands.
+     */
+    val triageAlertsEnabled: Boolean = true,
+    /**
+     * Highest [Migration.SMS_DEFAULTS_VERSION] whose tightened SMS defaults have been offered to
+     * this ledger. Same watermark shape as [seededRuleVersion] and for the same reason: both the
+     * sender allowlist and the ignore list are the user's to edit, so without this, clearing either
+     * one would last until the next launch.
+     */
+    val smsDefaultsVersion: Int = 0,
+    /**
+     * Whether an evening reminder goes out when transactions are still waiting to be categorised.
+     * Separate from [triageAlertsEnabled]: that one fires the instant a transaction lands and is
+     * per-transaction, this is one digest at a fixed hour for whatever is still sitting there.
+     */
+    val pendingReminderEnabled: Boolean = true,
+    /**
+     * How often the app writes an encrypted backup of itself into Download/InstaBalance. Off until
+     * a passphrase is set, because a backup nobody can open is not a backup and one written in
+     * plaintext into a public folder is the opposite of what the rest of this app is for.
+     */
+    val autoBackupFrequency: BackupFrequency = BackupFrequency.OFF,
+    /** Newest N auto-backups to keep, or [AutoBackup.KEEP_EVERYTHING] to never delete any. */
+    val autoBackupKeep: Int = 12,
+    val autoBackupLastRunAt: Long = 0L,
+    /** [AutoBackup.fingerprint] as of the last backup written, so an unchanged ledger is skipped. */
+    val autoBackupLastFingerprint: String = "",
+    /** Last outcome, shown in Settings. A backup that silently stopped working is worse than none. */
+    val autoBackupLastResult: String = "",
 ) {
     val hasPasscode: Boolean get() = passcodeHash != null && passcodeSalt != null
 
@@ -88,8 +131,19 @@ data class LedgerData(
     }
 }
 
-/** What the parser hands back for an auto-captured transaction. */
-data class ParsedTxn(val type: EntryType, val amountMinor: Long, val merchant: String? = null)
+/**
+ * What the parser hands back for an auto-captured transaction.
+ *
+ * [reportedBalanceMinor] is the bank's own "الرصيد المتاح 6542.73جم", where the message carries one.
+ * It is the balance AFTER this transaction, which is the same figure the manual re-sync asks you to
+ * read off the real app, arriving for free.
+ */
+data class ParsedTxn(
+    val type: EntryType,
+    val amountMinor: Long,
+    val merchant: String? = null,
+    val reportedBalanceMinor: Long? = null,
+)
 
 /**
  * Pure category assignment, kept out of the repository so it can be unit-tested without the
@@ -112,6 +166,133 @@ fun applyCategory(entries: List<Entry>, ids: Set<String>, categoryId: String?): 
  */
 fun applyNote(entries: List<Entry>, id: String, note: String): List<Entry> =
     entries.map { if (it.id == id) it.copy(note = note.trim()) else it }
+
+/**
+ * Same window as the cross-source dedupe, and for the same reason: two channels describing one
+ * transfer do not arrive at the same instant.
+ */
+const val CAPTURE_MATCH_WINDOW_MS = 20 * 60 * 1000L
+
+/**
+ * The Learning mode capture that recorded the same transaction as [entry], or null.
+ *
+ * One InstaPay transfer is announced twice, by the app and by the bank, and the dedupe keeps
+ * whichever landed first. That is usually the bank SMS, which is the worse of the two to read:
+ *
+ *   bank:   "...credited by EGP 1070 on 27-07 17:07 IPN REF# 47006796428 from ** for details
+ *            please call عمرو احمد فوزى مرعى 19342"
+ *   InstaPay: "You have received 1070.00 EGP from marrynbe@instapay"
+ *
+ * The bank names the counterparty "**" and splices their name into the middle of its own support
+ * line. The notification simply says who sent it. When Learning mode happens to have kept the
+ * other one, the detail sheet can show that instead.
+ *
+ * Matched on what the message MEANS, not on time alone: it must parse to the same direction and
+ * the same amount. A capture that merely arrived nearby is somebody else's transaction, and
+ * showing it under this one would be a lie about where the money went.
+ */
+fun captureFor(
+    entry: Entry,
+    captures: List<DebugCapture>,
+    config: SmsConfig,
+    windowMs: Long = CAPTURE_MATCH_WINDOW_MS,
+): DebugCapture? {
+    if (entry.type == EntryType.ANCHOR) return null
+    return captures
+        .filter { kotlin.math.abs(it.timestamp - entry.timestamp) <= windowMs }
+        .filter {
+            val parsed = BalanceParser.parse(it.text, config)
+            parsed != null && parsed.type == entry.type && parsed.amountMinor == entry.amountMinor
+        }
+        // The notification first: it is the one written for a person to read. Then the closest in
+        // time, so the result never depends on the order the list happens to be in.
+        .minWithOrNull(
+            compareBy<DebugCapture> { it.channel != "NOTIFICATION" }
+                .thenBy { kotlin.math.abs(it.timestamp - entry.timestamp) }
+                .thenBy { it.timestamp }
+        )
+}
+
+/**
+ * Whether a counterparty is a name at all.
+ *
+ * Blank is the easy half. The other half is the bank's mask: an InstaPay transfer seen as a bank
+ * SMS says the money came "from **", and the parser faithfully records "**", because it cannot know
+ * that this particular pair of asterisks means "we are not telling you". Anything with no letter
+ * and no digit in it names nobody, whatever characters it is made of.
+ */
+internal fun namesNobody(merchant: String?): Boolean =
+    merchant.isNullOrBlank() || merchant.none { it.isLetterOrDigit() }
+
+/**
+ * Folds what the dropped twin knew into the entry that was kept.
+ *
+ * One InstaPay transfer arrives twice, and the dedupe keeps whichever landed first. That is usually
+ * the bank SMS, which names the counterparty "**", so the useful message, the one saying
+ * "marrynbe@instapay", was thrown away whole. Everything downstream suffered for it: the list read
+ * as anonymous, search could not find the person, and a merchant rule had no name to match on.
+ *
+ * Only ever fills a blank. A counterparty already on the entry is the one the parser found in the
+ * message it kept, and a second message is no reason to overwrite it.
+ *
+ * Returns null when there is nothing to add, so the caller can skip the write entirely: this runs
+ * on every duplicate, and most duplicates teach us nothing.
+ */
+fun mergeTwinInto(
+    entries: List<Entry>,
+    type: EntryType,
+    amountMinor: Long,
+    timestamp: Long,
+    merchant: String?,
+    rules: List<MerchantRule>,
+    windowMs: Long = CAPTURE_MATCH_WINDOW_MS,
+): List<Entry>? {
+    if (namesNobody(merchant)) return null
+    val target = entries
+        .filter { it.type == type && it.amountMinor == amountMinor }
+        .filter { it.source == Source.NOTIFICATION || it.source == Source.SMS }
+        .filter { namesNobody(it.merchant) }
+        .filter { kotlin.math.abs(it.timestamp - timestamp) <= windowMs }
+        .minByOrNull { kotlin.math.abs(it.timestamp - timestamp) }
+        ?: return null
+
+    // Named at last, so the rules get their first real chance at it. Only while it is still
+    // uncategorised: a category chosen by hand is never overruled by a rule.
+    val named = target.copy(merchant = merchant)
+    val filed = if (named.categoryId == null) MerchantRules.categoriseNew(named, rules) else named
+    return entries.map { if (it.id == target.id) filed else it }
+}
+
+/**
+ * The anchor to write when the bank's own balance disagrees with ours, or null when it agrees or
+ * the message never carried one.
+ *
+ * Placed one millisecond after the transaction so it lands after the transaction itself and after
+ * any fee line sharing its timestamp, both of which are already counted in the figure the bank just
+ * reported. An anchor on the same millisecond would have them counted twice.
+ *
+ * Recorded as an ordinary visible ANCHOR rather than a silent correction, so it sits in the list
+ * saying what it did and can be deleted like anything else if the bank was talking about a
+ * different account.
+ */
+fun autoResyncAnchor(
+    reportedBalanceMinor: Long?,
+    currentBalanceMinor: Long,
+    timestamp: Long,
+): Entry? {
+    if (reportedBalanceMinor == null) return null
+    if (reportedBalanceMinor == currentBalanceMinor) return null
+    val drift = reportedBalanceMinor - currentBalanceMinor
+    val direction = if (drift > 0) "higher" else "lower"
+    return Entry(
+        type = EntryType.ANCHOR,
+        amountMinor = reportedBalanceMinor,
+        timestamp = timestamp + 1,
+        source = Source.SMS,
+        note = "Auto re-synced from your bank: ${Money.formatMinor(kotlin.math.abs(drift))} EGP $direction " +
+            "than recorded",
+    )
+}
 
 /**
  * Single source of truth for the ledger. It is an `object` (singleton) so the UI, the
@@ -166,7 +347,12 @@ object LedgerRepository {
                         runCatching { file.copyTo(File(file.parentFile, "ledger.enc.bak"), overwrite = true) }
                     }
             } else {
-                persist(_data.value)
+                // A first launch has no file, but it still needs the migration: the rules the app
+                // ships are added by it, and a brand new install skipping it would be the only
+                // install that never got them.
+                val fresh = Migration.apply(_data.value) ?: _data.value
+                _data.value = fresh
+                persist(fresh)
             }
         }
     }
@@ -184,9 +370,12 @@ object LedgerRepository {
         return base + delta
     }
 
+    /** The most recent re-sync, however it got there, or null if never anchored. */
+    fun lastAnchor(d: LedgerData = _data.value): Entry? =
+        d.entries.filter { it.type == EntryType.ANCHOR }.maxByOrNull { it.timestamp }
+
     /** Millis since the last "Set balance" anchor, or null if never anchored. */
-    fun lastAnchorTimestamp(d: LedgerData = _data.value): Long? =
-        d.entries.filter { it.type == EntryType.ANCHOR }.maxOfOrNull { it.timestamp }
+    fun lastAnchorTimestamp(d: LedgerData = _data.value): Long? = lastAnchor(d)?.timestamp
 
     /** Pure dedupe rule (extracted for tests): same direction + amount from an auto channel within the window. */
     fun isDuplicateAuto(entries: List<Entry>, type: EntryType, amountMinor: Long, timestamp: Long): Boolean =
@@ -206,12 +395,16 @@ object LedgerRepository {
         categoryId: String? = null,
     ) {
         require(type != EntryType.ANCHOR)
+        var overCategories: List<CategoryBudgetStatus> = emptyList()
         val milestone = synchronized(lock) {
             addEntryLocked(Entry(type = type, amountMinor = amountMinor, timestamp = timestamp,
                 source = Source.MANUAL, note = note, categoryId = categoryId))
-            evaluateBudgetLocked(timestamp)
+            val m = evaluateBudgetLocked(timestamp)
+            overCategories = evaluateCategoryBudgetsLocked(timestamp)
+            m
         }
         postMilestone(milestone)
+        overCategories.forEach { onCategoryBudget?.invoke(it) }
     }
 
     fun setBalance(amountMinor: Long, note: String, timestamp: Long) {
@@ -225,10 +418,26 @@ object LedgerRepository {
      */
     fun setNote(id: String, note: String) = mutate { it.copy(entries = applyNote(it.entries, id, note)) }
 
-    fun deleteEntry(id: String) = synchronized(lock) {
+    /**
+     * Returns the entry it removed, so the caller can offer Undo without snapshotting the ledger
+     * itself. Null when the id is already gone, which is what a double tap looks like.
+     */
+    fun deleteEntry(id: String): Entry? = synchronized(lock) {
+        val removed = _data.value.entries.firstOrNull { it.id == id } ?: return@synchronized null
         val next = _data.value.copy(entries = _data.value.entries.filterNot { it.id == id })
         _data.value = next
         persist(next)
+        removed
+    }
+
+    /**
+     * Puts back exactly what [deleteEntry] returned, id included, so anything else holding that id
+     * still points at the same entry. Re-sorted on the way in, because an entry restored minutes
+     * later still belongs at its own moment in the ledger, not at the end of it.
+     */
+    fun restoreEntry(entry: Entry) = synchronized(lock) {
+        if (_data.value.entries.any { it.id == entry.id }) return@synchronized
+        addEntryLocked(entry)
     }
 
     /**
@@ -237,22 +446,41 @@ object LedgerRepository {
      * within the window, this one is dropped (so a txn seen on BOTH channels counts once).
      * Returns true if it was actually added.
      */
-    fun addAuto(parsed: ParsedTxn, source: Source, rawText: String, timestamp: Long): Boolean {
+    fun addAuto(
+        parsed: ParsedTxn,
+        source: Source,
+        rawText: String,
+        timestamp: Long,
+        allowAutoResync: Boolean = true,
+        offerTriage: Boolean = true,
+    ): Boolean {
         var milestone: Int? = null
+        var uncategorised: Entry? = null
+        var overCategories: List<CategoryBudgetStatus> = emptyList()
         val added = synchronized(lock) {
             if (isDuplicateAuto(_data.value.entries, parsed.type, parsed.amountMinor, timestamp)) {
+                // Dropped as a duplicate, but not before taking the one thing it might know that
+                // the entry we kept does not: who the money was actually from.
+                mergeTwinInto(
+                    _data.value.entries, parsed.type, parsed.amountMinor, timestamp,
+                    parsed.merchant, _data.value.merchantRules,
+                )?.let { merged ->
+                    val next = _data.value.copy(entries = merged)
+                    _data.value = next
+                    persist(next)
+                }
                 return@synchronized false
             }
             // Rules run here, inside the lock, which is what lets a transaction captured while the
             // app is closed arrive already filed.
-            addEntryLocked(
-                MerchantRules.categoriseNew(
-                    Entry(type = parsed.type, amountMinor = parsed.amountMinor,
-                        timestamp = timestamp, source = source, rawText = rawText,
-                        merchant = parsed.merchant),
-                    _data.value.merchantRules,
-                )
+            val entry = MerchantRules.categoriseNew(
+                Entry(type = parsed.type, amountMinor = parsed.amountMinor,
+                    timestamp = timestamp, source = source, rawText = rawText,
+                    merchant = parsed.merchant),
+                _data.value.merchantRules,
             )
+            addEntryLocked(entry)
+            if (offerTriage && worthTriaging(entry)) uncategorised = entry
 
             // InstaPay sends arrive as an EGBANK SMS marked "IPN REF#" (card/ATM SMS aren't).
             // The SMS reports the transfer amount; InstaPay's fee is separate, so add it as its own
@@ -271,14 +499,48 @@ object LedgerRepository {
                         categoryId = Categories.FEES))
                 }
             }
+            // Last, so it compares against the balance with this transaction and its fee already
+            // in. The bank's figure is what the account actually holds; anything we are missing
+            // (a message that never arrived, cash the app cannot see) is the gap it closes.
+            //
+            // Off for a backfill. The comparison is between a balance the bank reported weeks ago
+            // and the balance as it stands today, which are answers to different questions, and
+            // acting on it would move the anchor to a figure that was true a fortnight back.
+            if (allowAutoResync) {
+                autoResyncAnchor(parsed.reportedBalanceMinor, balanceMinor(_data.value), timestamp)
+                    ?.let { addEntryLocked(it) }
+            }
+
             milestone = evaluateBudgetLocked(timestamp)
+            overCategories = evaluateCategoryBudgetsLocked(timestamp)
             true
         }
         // Outside the lock on purpose: posting a notification must not be able to hold the ledger
         // lock, and this runs on a binder thread while the app is closed.
-        if (added) postMilestone(milestone)
+        if (added) {
+            postMilestone(milestone)
+            overCategories.forEach { onCategoryBudget?.invoke(it) }
+            uncategorised?.let { onUncategorised?.invoke(it) }
+        }
         return added
     }
+
+    /**
+     * Writes what a scan of the phone's own SMS store found, at the times the messages arrived.
+     *
+     * Each one goes through [addAuto], so a backfilled message is filed by the merchant rules and
+     * deduped exactly like a live one. The auto re-sync is off: see the note there.
+     */
+    fun importBackfill(items: List<BackfillItem>): Int =
+        items.count {
+            addAuto(
+                it.parsed, Source.SMS, it.rawText, it.message.sentAt,
+                allowAutoResync = false,
+                // A scan of a year of history would post a notification per transaction. The
+                // triage offer is about the moment something happens, and none of these are that.
+                offerTriage = false,
+            )
+        }
 
     private fun addEntry(entry: Entry) = synchronized(lock) { addEntryLocked(entry) }
 
@@ -295,6 +557,18 @@ object LedgerRepository {
      * never imports NotificationManager and stays unit-testable.
      */
     @Volatile var onBudgetMilestone: ((milestone: Int, spentMinor: Long, limitMinor: Long) -> Unit)? = null
+
+    /**
+     * Fired for a captured entry nobody could file automatically, and again with the id when any
+     * entry gets a category, so an offer already in the shade can be taken down. Callbacks rather
+     * than direct calls for the same reason as the milestone above: the ledger never imports
+     * NotificationManager and stays unit-testable.
+     */
+    @Volatile var onUncategorised: ((Entry) -> Unit)? = null
+    @Volatile var onCategorised: ((ids: Set<String>) -> Unit)? = null
+
+    /** Posted when a category passes its own limit. One per category per month, see [Budget]. */
+    @Volatile var onCategoryBudget: ((CategoryBudgetStatus) -> Unit)? = null
 
     /**
      * Recomputes the fired-milestone state at the moment of the change rather than leaving it, so
@@ -340,10 +614,48 @@ object LedgerRepository {
             val next = d.copy(
                 budgetMonth = month,
                 highestMilestoneFired = toFire ?: fired,
+                // Both live off this one month stamp, and this runs first. See the note on
+                // carryOverCategoryMilestones for what goes wrong without this line.
+                categoryMilestones = Budget.carryOverCategoryMilestones(d.budgetMonth, month, d.categoryMilestones),
             )
             _data.value = next
             persist(next)
         }
+        return toFire
+    }
+
+    /**
+     * Must be called holding [lock], on the already-updated ledger. Returns the categories that
+     * have just gone over, which the caller posts outside the lock.
+     *
+     * Runs on filing as well as on capture, and that is the important half: almost everything
+     * arrives uncategorised, so the moment a category goes over its limit is usually the moment you
+     * file something into it, not the moment the money moved.
+     */
+    private fun evaluateCategoryBudgetsLocked(timestamp: Long): List<CategoryBudgetStatus> {
+        val d = _data.value
+        if (d.categories.none { (it.budgetMinor ?: 0L) > 0L }) return emptyList()
+
+        val zone = ZoneId.systemDefault()
+        val instant = Instant.ofEpochMilli(timestamp)
+        val month = Budget.monthKey(instant, zone)
+        // Shares budgetMonth with the monthly budget, so both reset on the same transaction.
+        val fired = Budget.carryOverCategoryMilestones(d.budgetMonth, month, d.categoryMilestones)
+
+        val toFire = Budget.categoryStatuses(d.entries, d.categories, instant, zone)
+            .filter { Budget.categoryMilestoneToFire(it.spentMinor, it.limitMinor, fired[it.category.id] ?: 0) != null }
+
+        val sameMonth = d.budgetMonth == month
+        if (toFire.isEmpty() && sameMonth) return emptyList()
+
+        val next = d.copy(
+            budgetMonth = month,
+            categoryMilestones = fired + toFire.associate {
+                it.category.id to Budget.categoryReached(it.spentMinor, it.limitMinor)
+            },
+        )
+        _data.value = next
+        persist(next)
         return toFire
     }
 
@@ -364,16 +676,26 @@ object LedgerRepository {
      * Entries are addressed by id, never by handing a list back, so an entry captured in the
      * background between the UI reading the flow and the user tapping cannot be dropped.
      */
-    fun setCategory(ids: Set<String>, categoryId: String?): Map<String, Pair<String?, Boolean>> =
-        synchronized(lock) {
-            val previous = _data.value.entries
+    fun setCategory(ids: Set<String>, categoryId: String?): Map<String, Pair<String?, Boolean>> {
+        var overCategories: List<CategoryBudgetStatus> = emptyList()
+        val previous = synchronized(lock) {
+            val was = _data.value.entries
                 .filter { it.id in ids }
                 .associate { it.id to (it.categoryId to it.categoryFromRule) }
             val next = _data.value.copy(entries = applyCategory(_data.value.entries, ids, categoryId))
             _data.value = next
             persist(next)
-            previous
+            // Filing is when a per-category limit is usually crossed: the money moved days ago,
+            // uncategorised, and counted against nothing until now.
+            overCategories = evaluateCategoryBudgetsLocked(System.currentTimeMillis())
+            was
         }
+        // Outside the lock, like the other callbacks. Takes down any triage offer still sitting in
+        // the shade for these entries, however they came to be filed.
+        if (categoryId != null) onCategorised?.invoke(ids)
+        overCategories.forEach { onCategoryBudget?.invoke(it) }
+        return previous
+    }
 
     /** Restores exactly what [setCategory] returned, rule flag included. */
     fun restoreCategories(previous: Map<String, Pair<String?, Boolean>>) = synchronized(lock) {
@@ -386,13 +708,14 @@ object LedgerRepository {
         persist(next)
     }
 
+    /** Empty when the name was blank or already taken, which [Categories.add] refuses. */
     fun addCategory(name: String, kind: CategoryKind, colorIndex: Int): String {
         var newId = ""
         synchronized(lock) {
-            val next = _data.value.copy(
-                categories = Categories.add(_data.value.categories, name, kind, colorIndex)
-            )
-            newId = next.categories.last().id
+            val categories = Categories.add(_data.value.categories, name, kind, colorIndex)
+            if (categories.size == _data.value.categories.size) return@synchronized
+            val next = _data.value.copy(categories = categories)
+            newId = categories.last().id
             _data.value = next
             persist(next)
         }
@@ -435,6 +758,20 @@ object LedgerRepository {
             }
         }
 
+    /**
+     * Clears this category's fired state along with the limit, so lowering a limit below what you
+     * have already spent alerts you once for the new limit rather than staying silent because the
+     * old one had already fired.
+     */
+    fun setCategoryBudget(id: String, limitMinor: Long?) = mutate { d ->
+        d.copy(
+            categories = d.categories.map {
+                if (it.id == id) it.copy(budgetMinor = limitMinor?.takeIf { l -> l > 0L }) else it
+            },
+            categoryMilestones = d.categoryMilestones - id,
+        )
+    }
+
     fun deleteCategory(id: String) = mutate { Categories.delete(it, id) }
 
     /**
@@ -442,17 +779,33 @@ object LedgerRepository {
      * rule itself: reaching for `merchantRules.last()` afterwards throws on the first rule and picks
      * an unrelated one after that, because this can legitimately add nothing.
      */
-    fun addRule(pattern: String, categoryId: String, now: Long): MerchantRule? {
+    fun addRule(
+        pattern: String,
+        categoryId: String,
+        now: Long,
+        label: String? = null,
+    ): MerchantRule? {
         val clean = MerchantRules.normalise(pattern)
         if (clean.isEmpty()) return null
-        val rule = MerchantRule(pattern = clean, categoryId = categoryId, createdAt = now)
+        val rule = MerchantRule(
+            pattern = clean, categoryId = categoryId, createdAt = now,
+            label = label?.trim()?.takeIf { it.isNotEmpty() },
+        )
         mutate { it.copy(merchantRules = it.merchantRules + rule) }
         return rule
     }
 
-    fun updateRule(id: String, pattern: String, categoryId: String) = mutate { d ->
+    fun updateRule(id: String, pattern: String, categoryId: String, label: String? = null) = mutate { d ->
         d.copy(merchantRules = d.merchantRules.map {
-            if (it.id == id) it.copy(pattern = MerchantRules.normalise(pattern), categoryId = categoryId) else it
+            if (it.id == id) {
+                it.copy(
+                    pattern = MerchantRules.normalise(pattern),
+                    categoryId = categoryId,
+                    label = label?.trim()?.takeIf { l -> l.isNotEmpty() },
+                )
+            } else {
+                it
+            }
         })
     }
 
@@ -551,6 +904,23 @@ object LedgerRepository {
     }
 
     fun setSmsConfig(config: SmsConfig) = mutate { it.copy(smsConfig = config) }
+
+    fun setTriageAlertsEnabled(on: Boolean) = mutate { it.copy(triageAlertsEnabled = on) }
+
+    fun setPendingReminderEnabled(on: Boolean) = mutate { it.copy(pendingReminderEnabled = on) }
+
+    fun setAutoBackupFrequency(f: BackupFrequency) = mutate { it.copy(autoBackupFrequency = f) }
+
+    fun setAutoBackupKeep(keep: Int) = mutate { it.copy(autoBackupKeep = keep) }
+
+    /** Recorded after a run, successful or not, so Settings can say what actually happened. */
+    fun recordAutoBackup(at: Long, fingerprint: String, result: String) = mutate {
+        it.copy(
+            autoBackupLastRunAt = at,
+            autoBackupLastFingerprint = fingerprint,
+            autoBackupLastResult = result,
+        )
+    }
 
     fun setWatchedPackages(packages: List<String>) = synchronized(lock) {
         val next = _data.value.copy(watchedPackages = packages.map { it.trim() }.filter { it.isNotEmpty() })

@@ -28,3 +28,6 @@ docs/reference/WhatsApp*
 # OS
 .DS_Store
 Thumbs.db
+
+# Encrypted ledger copies pulled from the phone for debugging. Real financial data.
+.ledger-backups/

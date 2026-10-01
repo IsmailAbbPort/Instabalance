@@ -18,6 +18,9 @@ object BudgetAlerts {
     private const val CHANNEL_ID = "budget_alerts"
     private const val NOTIFICATION_ID = 4201
 
+    /** Offset so a category's id hash can never collide with the monthly budget's own alert. */
+    private const val CATEGORY_NOTIFICATION_BASE = 4300
+
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(
@@ -35,13 +38,29 @@ object BudgetAlerts {
      * Silently does nothing if the user never granted POST_NOTIFICATIONS. The budget card on Home
      * keeps working either way, so a denied permission costs the alert and not the feature.
      */
-    fun post(context: Context, milestone: Int, spentMinor: Long, limitMinor: Long) {
+    fun post(context: Context, milestone: Int, spentMinor: Long, limitMinor: Long) =
+        post(context, NOTIFICATION_ID, Budget.title(milestone), Budget.body(spentMinor, limitMinor))
+
+    /**
+     * A category passing its own limit. Its own notification id per category, so two categories
+     * going over in the same week do not overwrite each other, and so neither overwrites the
+     * monthly budget's alert.
+     */
+    fun postCategory(context: Context, status: CategoryBudgetStatus) =
+        post(
+            context,
+            CATEGORY_NOTIFICATION_BASE + status.category.id.hashCode(),
+            Budget.categoryTitle(status.category),
+            Budget.categoryBody(status),
+        )
+
+    private fun post(context: Context, id: Int, title: String, body: String) {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return
 
         val open = PendingIntent.getActivity(
             context,
-            0,
+            id,
             Intent(context, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -49,8 +68,8 @@ object BudgetAlerts {
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle(Budget.title(milestone))
-            .setContentText(Budget.body(spentMinor, limitMinor))
+            .setContentTitle(title)
+            .setContentText(body)
             .setContentIntent(open)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -58,6 +77,6 @@ object BudgetAlerts {
 
         // Throws only if the runtime permission is missing, which areNotificationsEnabled already
         // covers; catching keeps a failed alert from ever reaching a background receiver.
-        runCatching { manager.notify(NOTIFICATION_ID, notification) }
+        runCatching { manager.notify(id, notification) }
     }
 }

@@ -80,10 +80,12 @@ internal fun CategoryPickerSheet(
         onPicked(id, if (learn && pattern.isNotBlank()) pattern else null)
     }
 
-    // Suggested: what a rule would have said, then what you reached for most recently. Both are
-    // just shortcuts into the same list below, never a different set of choices.
+    // Suggested: what a rule would have said, then where this exact amount went last time, then
+    // what you reached for most recently. All three are just shortcuts into the same list below,
+    // never a different set of choices.
     val suggested = buildList {
         existingRule?.categoryId?.let { add(it) }
+        addAll(amountTwinCategoryIds(data.entries, entry))
         addAll(recentIds)
     }.distinct().mapNotNull { id -> options.firstOrNull { it.id == id } }.take(4)
 
@@ -116,7 +118,10 @@ internal fun CategoryPickerSheet(
                 Text("Suggested", style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(6.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     suggested.forEach { CategoryChip(it) { pick(it.id) } }
                 }
             }
@@ -125,7 +130,12 @@ internal fun CategoryPickerSheet(
             Text("All", style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(6.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Twenty chips wrap to four rows, and without the vertical spacing those rows sit flush
+            // against each other and read as one squashed block.
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 options.forEach { CategoryChip(it) { pick(it.id) } }
                 FilterChip(
                     selected = false,
@@ -136,49 +146,54 @@ internal fun CategoryPickerSheet(
 
             if (creating) {
                 Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        label = { Text("Name") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Button(
-                        enabled = newName.isNotBlank(),
-                        onClick = {
-                            val kind = if (entry.type == EntryType.CREDIT) CategoryKind.INCOME
-                            else CategoryKind.EXPENSE
-                            // First unused colour, so a category made mid-triage does not come out
-                            // looking identical to one that already exists.
-                            val id = LedgerRepository.addCategory(
-                                newName, kind,
-                                Categories.firstFreeColour(data.categories) ?: 0,
-                            )
-                            pick(id)
-                        },
-                    ) { Text("Add") }
-                }
+                // Stacked, not side by side: sharing the row with the button left the name field
+                // about half a phone wide, which is not enough to read what you are typing.
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    enabled = newName.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        val kind = if (entry.type == EntryType.CREDIT) CategoryKind.INCOME
+                        else CategoryKind.EXPENSE
+                        // First unused colour, so a category made mid-triage does not come out
+                        // looking identical to one that already exists.
+                        val id = LedgerRepository.addCategory(
+                            newName, kind,
+                            Categories.firstFreeColour(data.categories) ?: 0,
+                        )
+                        pick(id)
+                    },
+                ) { Text("Add") }
             }
 
             if (canLearn) {
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(20.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Always file this merchant here",
-                            style = MaterialTheme.typography.bodyMedium)
-                        Text("Matches anything containing \"$pattern\"",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    // One line beside the switch. The second line used to say "Matches anything
+                    // containing X", which restated the field directly below it and wrapped to
+                    // three lines, squeezing both against each other.
+                    Text(
+                        "Always file this merchant here",
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.width(12.dp))
                     Switch(checked = learn, onCheckedChange = { learn = it })
                 }
                 if (learn) {
+                    Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = pattern,
                         onValueChange = { pattern = it.uppercase() },
                         label = { Text("Match on") },
+                        supportingText = { Text("Any shop whose name contains this.") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )

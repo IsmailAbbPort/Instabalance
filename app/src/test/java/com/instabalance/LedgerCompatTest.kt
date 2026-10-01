@@ -92,6 +92,10 @@ class LedgerCompatTest {
             setOf(
                 "categories", "merchantRules", "smsConfig",
                 "monthlyBudgetMinor", "budgetMonth", "highestMilestoneFired",
+                "seededRuleVersion", "triageAlertsEnabled", "categoryMilestones",
+                "smsDefaultsVersion", "pendingReminderEnabled",
+                "autoBackupFrequency", "autoBackupKeep", "autoBackupLastRunAt",
+                "autoBackupLastFingerprint", "autoBackupLastResult",
             ),
             added,
         )

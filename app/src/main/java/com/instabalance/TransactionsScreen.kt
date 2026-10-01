@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -19,9 +20,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,8 +31,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,9 +43,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeParseException
@@ -63,12 +70,18 @@ import java.time.format.DateTimeParseException
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun TransactionsScreen(onBack: () -> Unit) {
+internal fun TransactionsScreen(
+    filter: TransactionFilter,
+    onFilterChange: (TransactionFilter) -> Unit,
+    onBack: () -> Unit,
+) {
     val data by LedgerRepository.data.collectAsStateWithLifecycle()
-    var filter by remember { mutableStateOf(TransactionFilter()) }
     var showFilters by remember { mutableStateOf(false) }
     var detail by remember { mutableStateOf<Entry?>(null) }
     var picking by remember { mutableStateOf<Entry?>(null) }
+
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     val zone = remember { ZoneId.systemDefault() }
     val today = remember(data) { LocalDate.now(zone) }
@@ -77,6 +90,12 @@ internal fun TransactionsScreen(onBack: () -> Unit) {
         TransactionFilters.apply(data.entries, filter, data.categories, today, zone)
     }
     val totals = remember(results) { TransactionFilters.totals(results) }
+
+    // Narrowing the list while halfway down it leaves you looking at rows that are no longer the
+    // answer to anything. Applies to the search box as much as to the sheet, which is why this
+    // keys on the whole filter rather than on the sheet closing.
+    val listState = rememberLazyListState()
+    LaunchedEffect(filter) { listState.scrollToItem(0) }
 
     Scaffold(
         topBar = {
@@ -104,18 +123,19 @@ internal fun TransactionsScreen(onBack: () -> Unit) {
                 ),
             )
         },
+        snackbarHost = { SnackbarHost(snackbar) },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 OutlinedTextField(
                     value = filter.query,
-                    onValueChange = { filter = filter.copy(query = it) },
+                    onValueChange = { onFilterChange(filter.copy(query = it)) },
                     label = { Text("Search shop, note or category") },
                     singleLine = true,
                     trailingIcon = {
                         if (filter.query.isNotEmpty()) {
-                            IconButton(onClick = { filter = filter.copy(query = "") }) {
+                            IconButton(onClick = { onFilterChange(filter.copy(query = "")) }) {
                                 Icon(Icons.Default.Close, contentDescription = "Clear search")
                             }
                         }
@@ -126,7 +146,7 @@ internal fun TransactionsScreen(onBack: () -> Unit) {
                 TotalsBar(totals)
                 if (filter.isActive) {
                     Spacer(Modifier.height(6.dp))
-                    TextButton(onClick = { filter = TransactionFilter(sortBy = filter.sortBy) }) {
+                    TextButton(onClick = { onFilterChange(TransactionFilter(sortBy = filter.sortBy)) }) {
                         Text("Clear filters")
                     }
                 }
@@ -145,6 +165,7 @@ internal fun TransactionsScreen(onBack: () -> Unit) {
                 // is not nested inside another scroller.
                 LazyColumn(
                     Modifier.fillMaxSize(),
+                    state = listState,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
                         start = 16.dp, end = 16.dp, bottom = 24.dp,
                     ),
@@ -162,7 +183,7 @@ internal fun TransactionsScreen(onBack: () -> Unit) {
         FilterSheet(
             filter = filter,
             categories = data.categories,
-            onChange = { filter = it },
+            onChange = onFilterChange,
             onDismiss = { showFilters = false },
         )
     }
@@ -173,6 +194,7 @@ internal fun TransactionsScreen(onBack: () -> Unit) {
             data = data,
             onDismiss = { detail = null },
             onChangeCategory = { detail = null; picking = entry },
+            onDeleted = { removed -> scope.launch { offerUndoDelete(snackbar, removed) } },
         )
     }
 
@@ -181,13 +203,16 @@ internal fun TransactionsScreen(onBack: () -> Unit) {
             entry = entry,
             data = data,
             recentIds = recentCategoryIds(data.entries),
-            onDismiss = { picking = null },
+            // Back to the detail sheet either way, because that is where you came from and it is
+            // where the note lives. Filing something is usually the moment you want to write one.
+            onDismiss = { picking = null; detail = entry },
             onPicked = { id, pattern ->
                 picking = null
                 LedgerRepository.setCategory(setOf(entry.id), id)
                 if (pattern != null) {
                     LedgerRepository.addRule(pattern, id, System.currentTimeMillis())
                 }
+                detail = entry
             },
         )
     }
@@ -249,8 +274,10 @@ private fun FilterSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Held as text, not Long, so a half-typed "1" is not repeatedly parsed and snapped back.
-    var minText by remember { mutableStateOf(filter.minMinor?.let { Money.formatMinor(it) } ?: "") }
-    var maxText by remember { mutableStateOf(filter.maxMinor?.let { Money.formatMinor(it) } ?: "") }
+    // Unformatted, because formatMinor emits a grouping comma that sanitizeAmount then strips on
+    // the next keystroke: reopening the sheet and typing one character used to change the bound.
+    var minText by remember { mutableStateOf(filter.minMinor?.let { plainAmount(it) } ?: "") }
+    var maxText by remember { mutableStateOf(filter.maxMinor?.let { plainAmount(it) } ?: "") }
     var fromText by remember { mutableStateOf(filter.customFrom?.toString() ?: "") }
     var toText by remember { mutableStateOf(filter.customTo?.toString() ?: "") }
 
@@ -269,7 +296,16 @@ private fun FilterSheet(
                 Direction.entries.forEach { d ->
                     FilterChip(
                         selected = filter.direction == d,
-                        onClick = { onChange(filter.copy(direction = d)) },
+                        // Pruned, or an income category stays selected behind an Expenses filter:
+                        // its chip is gone, the badge says filtered, and the empty list has no
+                        // explanation anywhere on screen.
+                        onClick = {
+                            onChange(
+                                TransactionFilters.pruneForDirection(
+                                    filter.copy(direction = d), categories,
+                                )
+                            )
+                        },
                         label = {
                             Text(
                                 when (d) {
@@ -369,12 +405,15 @@ private fun FilterSheet(
                     onClick = { onChange(filter.copy(categoryIds = filter.categoryIds.toggle(null))) },
                     label = { Text("Uncategorised") },
                 )
-                categories.filter { !it.hidden }.forEach { c ->
+                // Only the ones this direction can actually match, and named so the two presets
+                // both called "Other" can be told apart when both are on screen.
+                val offered = TransactionFilters.selectableCategories(categories, filter.direction)
+                offered.forEach { c ->
                     FilterChip(
                         selected = c.id in filter.categoryIds,
                         onClick = { onChange(filter.copy(categoryIds = filter.categoryIds.toggle(c.id))) },
                         leadingIcon = { CategoryDot(c) },
-                        label = { Text(c.name) },
+                        label = { Text(TransactionFilters.labelFor(offered, c)) },
                     )
                 }
             }
@@ -417,16 +456,17 @@ private fun FilterSheet(
             }
 
             Spacer(Modifier.height(20.dp))
-            Row {
-                TextButton(onClick = onDismiss) { Text("Done") }
-                Spacer(Modifier.weight(1f))
-                AssistChip(
+            // Done on the right and filled: it is the primary action and the one the thumb reaches
+            // for, and Reset sitting there meant a mis-tap threw the filter away.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
                     onClick = {
                         minText = ""; maxText = ""; fromText = ""; toText = ""
                         onChange(TransactionFilter(sortBy = filter.sortBy))
                     },
-                    label = { Text("Reset") },
-                )
+                ) { Text("Reset") }
+                Spacer(Modifier.weight(1f))
+                Button(onClick = onDismiss) { Text("Done") }
             }
         }
     }
@@ -439,6 +479,9 @@ private fun SheetLabel(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant)
     Spacer(Modifier.height(6.dp))
 }
+
+/** "1234.50", with no grouping comma for [sanitizeAmount] to strip back out. */
+private fun plainAmount(minor: Long): String = Money.formatMinor(minor).replace(",", "")
 
 /** Tapping a selected chip clears it, which is what makes a multi-select feel like one. */
 private fun Set<String?>.toggle(id: String?): Set<String?> =

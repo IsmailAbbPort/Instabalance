@@ -9,6 +9,12 @@ import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.FilterChip
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -108,7 +114,7 @@ internal fun SettingsScreen(
             )
             SettingsPanel(data)
             BackupSection(data)
-            if (BuildConfig.DEBUG) DeveloperTools()
+            if (isDevSandbox) DeveloperTools()
         }
     }
 }
@@ -207,13 +213,15 @@ private fun BudgetSetting(data: LedgerData) {
             val usable = blank || parsed != null
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(
+                ConfirmingTextButton(
+                    label = if (blank) "Turn off budget" else "Save budget",
+                    confirmedLabel = if (blank) "Turned off!" else "Saved!",
                     enabled = usable,
                     onClick = {
                         LedgerRepository.setBudget(parsed)
                         if (parsed != null && !notificationsOn) askForNotifications()
                     },
-                ) { Text(if (blank) "Turn off budget" else "Save budget") }
+                )
             }
             if (!usable) {
                 Text(
@@ -241,6 +249,63 @@ private fun BudgetSetting(data: LedgerData) {
                     "Alerts are on.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Categorise as it happens", style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold)
+            Text(
+                "When a transfer arrives that no rule can file, a silent notification offers three " +
+                    "categories so you can file it while you still remember what it was. It never " +
+                    "makes a sound, never appears for anything a rule already filed, and goes away " +
+                    "the moment the transaction is categorised.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Offer to file new transactions", Modifier.weight(1f))
+                Switch(
+                    checked = data.triageAlertsEnabled,
+                    onCheckedChange = {
+                        LedgerRepository.setTriageAlertsEnabled(it)
+                        if (it && !notificationsOn) askForNotifications()
+                    },
+                )
+            }
+            if (data.triageAlertsEnabled && !notificationsOn) {
+                Text(
+                    "Notifications are not allowed for this app, so nothing will be offered.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+
+            Text(
+                "One reminder at ${Reminders.HOUR} if anything is still waiting at the end of the " +
+                    "day, counted in a single notification however many there are. Nothing is sent " +
+                    "on a day your review list is empty.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Evening reminder", Modifier.weight(1f))
+                Switch(
+                    checked = data.pendingReminderEnabled,
+                    onCheckedChange = {
+                        LedgerRepository.setPendingReminderEnabled(it)
+                        ReminderAlarm.sync(context, it)
+                        if (it && !notificationsOn) askForNotifications()
+                    },
                 )
             }
         }
@@ -350,12 +415,12 @@ private fun SettingsPanel(data: LedgerData) {
                 label = { Text("Max fee cap (EGP, blank = none)") },
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-            TextButton(onClick = {
+            ConfirmingTextButton(label = "Save fee settings", confirmedLabel = "Saved!") {
                 val bps = Money.percentToBasisPoints(pct) ?: 0
                 val minMinor = Money.parseToMinor(minv) ?: 0L
                 val capMinor = if (capv.isBlank()) null else Money.parseToMinor(capv)
                 LedgerRepository.setFeeConfig(true, bps, minMinor, capMinor)
-            }) { Text("Save fee settings") }
+            }
         }
 
         HorizontalDivider()
@@ -381,9 +446,9 @@ private fun SettingsPanel(data: LedgerData) {
             label = { Text("Watched packages") },
             modifier = Modifier.fillMaxWidth()
         )
-        TextButton(onClick = {
+        ConfirmingTextButton(label = "Save watched apps", confirmedLabel = "Saved!") {
             LedgerRepository.setWatchedPackages(pkgs.split(",").map { it.trim() })
-        }) { Text("Save watched apps") }
+        }
 
         if (data.captures.isNotEmpty()) {
             HorizontalDivider()
@@ -423,6 +488,8 @@ private fun BackupSection(data: LedgerData) {
     var status by remember { mutableStateOf<String?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var pending by remember { mutableStateOf<BackupFile?>(null) }
+    /** An encrypted backup we have read but cannot open until a passphrase is typed. */
+    var locked by remember { mutableStateOf<String?>(null) }
 
     val exporter = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
@@ -445,6 +512,12 @@ private fun BackupSection(data: LedgerData) {
         }.getOrNull()
         if (text == null) {
             failure = "That file could not be read."
+            return@rememberLauncherForActivityResult
+        }
+        // An automatic backup is encrypted, so it needs the passphrase before it is even a backup
+        // we can describe. Detected by reading the file rather than by its extension.
+        if (BackupCrypto.looksEncrypted(text)) {
+            locked = text
             return@rememberLauncherForActivityResult
         }
         when (val parsed = Backup.decode(text)) {
@@ -500,6 +573,53 @@ private fun BackupSection(data: LedgerData) {
         }
     }
 
+    AutoBackupSection(data)
+
+    locked?.let { text ->
+        var passphrase by remember(text) { mutableStateOf("") }
+        var wrong by remember(text) { mutableStateOf<String?>(null) }
+        AlertDialog(
+            onDismissRequest = { locked = null },
+            title = { Text("This backup is encrypted") },
+            text = {
+                Column {
+                    Text(
+                        "Enter the backup passphrase you set on the phone that wrote it. It is not " +
+                            "your app passcode, and the app cannot recover it for you.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = passphrase,
+                        onValueChange = { passphrase = it; wrong = null },
+                        label = { Text("Backup passphrase") },
+                        singleLine = true,
+                        isError = wrong != null,
+                        supportingText = wrong?.let { { Text(it) } },
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = passphrase.isNotEmpty(),
+                    onClick = {
+                        when (val opened = BackupCrypto.decrypt(text, passphrase)) {
+                            is BackupCrypto.Opened.Failed -> wrong = opened.reason
+                            is BackupCrypto.Opened.Ok ->
+                                when (val parsed = Backup.decode(opened.plaintext)) {
+                                    is BackupParse.Ok -> { locked = null; pending = parsed.file }
+                                    is BackupParse.Failed -> wrong = parsed.reason
+                                }
+                        }
+                    },
+                ) { Text("Open") }
+            },
+            dismissButton = { TextButton(onClick = { locked = null }) { Text("Cancel") } },
+        )
+    }
+
     pending?.let { file ->
         val summary = Backup.summarise(file.data)
         val range = Backup.describeRange(summary)
@@ -546,10 +666,179 @@ private fun BackupSection(data: LedgerData) {
 }
 
 /**
- * Debug builds only, and compiled out of release entirely by the BuildConfig.DEBUG check at the
- * call site. Exists so the charts, the review inbox and the budget can be seen on a machine that
- * has no real messages, without waiting weeks for them.
+ * Emulator only, gated by [isDevSandbox] at the call site. Exists so the charts, the review inbox
+ * and the budget can be seen on a machine that has no real messages, without waiting weeks for
+ * them. Both buttons destroy the ledger, which is why a debug-build check was not enough: the
+ * phone runs the debug APK too.
  */
+/**
+ * The backup that writes itself.
+ *
+ * Gated on a passphrase rather than offered first and secured later: everything this writes goes
+ * into a public folder, and the only version of that worth shipping is the encrypted one.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AutoBackupSection(data: LedgerData) {
+    val context = LocalContext.current
+    var settingPassphrase by remember { mutableStateOf(false) }
+    val hasPassphrase = remember(settingPassphrase) { BackupPassphrase.isSet() }
+
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Back up automatically", style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold)
+            Text(
+                "Writes an encrypted copy into Download/${AutoBackup.FOLDER} on its own. It survives " +
+                    "uninstalling the app and opens on any phone, as long as you remember the " +
+                    "passphrase. Nothing else on the phone can read it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            if (!hasPassphrase) {
+                Text(
+                    "Set a passphrase to turn this on. It is not your app passcode, and if you " +
+                        "lose it the backups are gone with it: nothing can open them, including us.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                OutlinedButton(
+                    onClick = { settingPassphrase = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Set a backup passphrase") }
+            } else {
+                Text("How often", style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    BackupFrequency.entries.forEach { f ->
+                        FilterChip(
+                            selected = data.autoBackupFrequency == f,
+                            onClick = {
+                                LedgerRepository.setAutoBackupFrequency(f)
+                                AutoBackupAlarm.sync(context, LedgerRepository.data.value)
+                            },
+                            label = { Text(f.label) },
+                        )
+                    }
+                }
+
+                Text("Old backups", style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AutoBackup.KEEP_CHOICES.forEach { keep ->
+                        FilterChip(
+                            selected = data.autoBackupKeep == keep,
+                            onClick = { LedgerRepository.setAutoBackupKeep(keep) },
+                            label = {
+                                Text(
+                                    if (keep == AutoBackup.KEEP_EVERYTHING) "Keep all"
+                                    else "Newest $keep"
+                                )
+                            },
+                        )
+                    }
+                }
+                Text(
+                    if (data.autoBackupKeep == AutoBackup.KEEP_EVERYTHING) {
+                        "Nothing is ever deleted. The folder grows until you tidy it yourself."
+                    } else {
+                        "Once there are more than ${data.autoBackupKeep}, the oldest is deleted as a " +
+                            "new one is written. Only backups this setting wrote are ever deleted."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                OutlinedButton(
+                    onClick = { AutoBackupAlarm.runIfDue(context, force = true) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Back up now") }
+
+                TextButton(onClick = { settingPassphrase = true }) { Text("Change the passphrase") }
+
+                if (data.autoBackupLastRunAt > 0L) {
+                    Text(
+                        "Last run ${Backup.describeMoment(data.autoBackupLastRunAt)}: " +
+                            data.autoBackupLastResult,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+
+    if (settingPassphrase) {
+        PassphraseDialog(
+            onDismiss = { settingPassphrase = false },
+            onSet = {
+                BackupPassphrase.init(context)
+                BackupPassphrase.set(it)
+                settingPassphrase = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun PassphraseDialog(onDismiss: () -> Unit, onSet: (String) -> Unit) {
+    var first by remember { mutableStateOf("") }
+    var second by remember { mutableStateOf("") }
+    val tooShort = first.isNotEmpty() && first.length < 8
+    val mismatch = second.isNotEmpty() && first != second
+    val usable = first.length >= 8 && first == second
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Backup passphrase") },
+        text = {
+            Column {
+                Text(
+                    "Everything written to Download/${AutoBackup.FOLDER} is encrypted with this. " +
+                        "Write it down somewhere that is not this phone: if you lose the phone and " +
+                        "the passphrase, the backups are unreadable.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = first,
+                    onValueChange = { first = it },
+                    label = { Text("Passphrase") },
+                    singleLine = true,
+                    isError = tooShort,
+                    supportingText = if (tooShort) {
+                        { Text("At least 8 characters.") }
+                    } else null,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = second,
+                    onValueChange = { second = it },
+                    label = { Text("Type it again") },
+                    singleLine = true,
+                    isError = mismatch,
+                    supportingText = if (mismatch) {
+                        { Text("These do not match.") }
+                    } else null,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = usable, onClick = { onSet(first) }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 @Composable
 private fun DeveloperTools() {
     var confirmLoad by remember { mutableStateOf(false) }
@@ -564,7 +853,7 @@ private fun DeveloperTools() {
             Text("Developer tools", style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold)
             Text(
-                "Debug builds only. Not present in a release build.",
+                "Emulator only. Never shown on a phone, whichever build is installed.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

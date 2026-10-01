@@ -92,6 +92,74 @@ internal fun BudgetCard(status: BudgetStatus, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * The categories that set themselves a limit, worst first.
+ *
+ * Its own card rather than a section of the budget one, because a category limit works with or
+ * without a monthly budget: "eating out under 3,000" is a sentence you can mean on its own. Hidden
+ * entirely when nothing has a limit, which is how it starts.
+ */
+@Composable
+internal fun CategoryBudgetsCard(statuses: List<CategoryBudgetStatus>, modifier: Modifier = Modifier) {
+    if (statuses.isEmpty()) return
+    val scheme = MaterialTheme.colorScheme
+
+    Card(
+        modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = scheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text("Category limits", style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold)
+            statuses.forEach { s ->
+                Spacer(Modifier.height(12.dp))
+                val colour = when {
+                    s.percent >= 100 -> scheme.error
+                    s.percent >= 90 -> scheme.secondary
+                    else -> scheme.primary
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    CategoryDot(s.category)
+                    Spacer(Modifier.height(0.dp))
+                    Text(
+                        "  ${s.category.name}",
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text("${s.percent}%", fontWeight = FontWeight.Bold, color = colour)
+                }
+                Spacer(Modifier.height(6.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(scheme.surfaceVariant)
+                ) {
+                    val fraction = (s.percent.coerceIn(0, 100)) / 100f
+                    if (fraction > 0f) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(fraction)
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(colour)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "${Money.formatMinor(s.spentMinor)} of ${Money.formatMinor(s.limitMinor)} EGP",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
 /** The tappable "N to categorise" banner. Hidden entirely at zero rather than showing a proud 0. */
 @Composable
 internal fun InboxBanner(count: Int, onClick: () -> Unit) {

@@ -123,6 +123,10 @@ object Backup {
         )
     }
 
+    /** "19 Sep 2026", for telling the user when the last automatic backup ran. */
+    fun describeMoment(at: Long, zone: ZoneId = ZoneId.systemDefault()): String =
+        Instant.ofEpochMilli(at).atZone(zone).format(readableFmt)
+
     fun suggestedFileName(now: Long, zone: ZoneId = ZoneId.systemDefault()): String =
         "instabalance-${Instant.ofEpochMilli(now).atZone(zone).format(fileNameFmt)}.json"
 

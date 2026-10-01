@@ -16,8 +16,12 @@ class SmsConfigTest {
     // ---- sender allowlist ---------------------------------------------------
 
     @Test fun anEmptyAllowlistReadsEverySender() {
-        assertTrue(SmsConfig().acceptsSender("ANYBANK"))
-        assertTrue(SmsConfig().acceptsSender("+201234567890"))
+        // No longer the default (that is EGBANK now), but still expressible, and anyone on a bank
+        // these defaults do not know needs it.
+        val everyone = SmsConfig(senders = emptyList())
+
+        assertTrue(everyone.acceptsSender("ANYBANK"))
+        assertTrue(everyone.acceptsSender("+201234567890"))
     }
 
     @Test fun anAllowlistKeepsOthersOut() {

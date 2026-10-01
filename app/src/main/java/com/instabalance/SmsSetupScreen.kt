@@ -1,5 +1,9 @@
 package com.instabalance
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -23,6 +27,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
@@ -39,13 +44,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Point the reader at your own bank.
@@ -253,6 +264,8 @@ internal fun SmsSetupScreen(onBack: () -> Unit) {
                 }
             }
 
+            SetupCard("5. Catch up on missed messages") { BackfillSection(data) }
+
             SetupCard("Start over") {
                 Text(
                     "Puts every word back to the Egyptian bank defaults. Your transactions are " +
@@ -384,6 +397,108 @@ private fun WordList(
 private fun FlowRowOfChips(items: List<String>, onPick: (String) -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         items.forEach { AssistChip(onClick = { onPick(it) }, label = { Text(it) }) }
+    }
+}
+
+/**
+ * Recovers transactions from messages that are still on the phone but which the app never saw:
+ * anything that arrived while it was not running, before it was installed, or during a doze.
+ *
+ * READ_SMS is asked for here and nowhere else, at the moment it is used rather than at startup,
+ * because it is a heavier permission than the rest of the app needs and everything else works
+ * without it. Denying it costs you this button and nothing more.
+ */
+@Composable
+private fun BackfillSection(data: LedgerData) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var days by remember { mutableStateOf(SmsBackfill.WINDOWS_DAYS.first()) }
+    var scanning by remember { mutableStateOf(false) }
+    var outcome by remember { mutableStateOf<String?>(null) }
+
+    fun scan() {
+        scanning = true
+        outcome = null
+        scope.launch {
+            // Off the main thread: this is a provider query over potentially thousands of rows,
+            // and every one of them goes through the parser.
+            val added = withContext(Dispatchers.IO) {
+                val messages = SmsInbox.since(
+                    context, SmsBackfill.cutoff(days, System.currentTimeMillis()),
+                )
+                val plan = SmsBackfill.plan(
+                    LedgerRepository.data.value.entries, messages, LedgerRepository.data.value.smsConfig,
+                )
+                val written = LedgerRepository.importBackfill(plan.items)
+                Triple(written, plan.alreadyKnown, plan.unreadable)
+            }
+            outcome = when {
+                added.first > 0 ->
+                    "Added ${added.first} transaction${if (added.first == 1) "" else "s"}. " +
+                        "They are in the inbox waiting to be categorised."
+                added.second > 0 -> "Nothing new. The ${added.second} found were already recorded."
+                added.third > 0 ->
+                    "Nothing readable. ${added.third} message${if (added.third == 1) "" else "s"} " +
+                        "from your bank did not parse, so the words above need work."
+                else -> "No messages from your senders in the last $days days."
+            }
+            scanning = false
+        }
+    }
+
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) scan() else outcome = "Without permission to read past messages there is nothing to scan."
+    }
+
+    Text(
+        "Your bank's old texts are still on this phone. This reads them and adds anything the app " +
+            "missed, at the time it actually happened, so the charts are right about that period " +
+            "too. Nothing leaves the phone, and anything already recorded is skipped.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(10.dp))
+    Text("How far back", style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Spacer(Modifier.height(4.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SmsBackfill.WINDOWS_DAYS.forEach { d ->
+            FilterChip(
+                selected = days == d,
+                onClick = { days = d },
+                label = { Text(if (d >= 365) "1 year" else "$d days") },
+            )
+        }
+    }
+    Spacer(Modifier.height(10.dp))
+    OutlinedButton(
+        enabled = !scanning,
+        onClick = {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) ==
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                scan()
+            } else {
+                launcher.launch(Manifest.permission.READ_SMS)
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text(if (scanning) "Scanning..." else "Scan past messages") }
+
+    outcome?.let {
+        Spacer(Modifier.height(8.dp))
+        Text(it, style = MaterialTheme.typography.bodySmall)
+    }
+
+    if (data.smsConfig.senders.isEmpty()) {
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Name your bank's sender above first, or this reads every text on the phone looking " +
+                "for one that parses.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
     }
 }
 

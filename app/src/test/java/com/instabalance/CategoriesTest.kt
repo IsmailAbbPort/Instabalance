@@ -11,6 +11,49 @@ class CategoriesTest {
         Entry(id = id, type = type, amountMinor = 100, timestamp = 1, categoryId = categoryId,
             categoryFromRule = fromRule)
 
+    // ---- the order chips are drawn in ---------------------------------------
+
+    @Test fun byNameIsAlphabetical() {
+        val out = Categories.byName(
+            listOf(
+                Category("c", "Rent", CategoryKind.EXPENSE, 0),
+                Category("a", "Bills", CategoryKind.EXPENSE, 1),
+                Category("b", "Groceries", CategoryKind.EXPENSE, 2),
+            )
+        )
+
+        assertEquals(listOf("Bills", "Groceries", "Rent"), out.map { it.name })
+    }
+
+    @Test fun anameYouTypedInLowercaseSortsWithTheRest() {
+        // Sorting by raw name would put every lowercase name below every preset, which reads as
+        // one alphabetical list followed by a second one.
+        val out = Categories.byName(
+            listOf(
+                Category("a", "Bills", CategoryKind.EXPENSE, 0),
+                Category("b", "gym", CategoryKind.EXPENSE, 1),
+                Category("c", "Rent", CategoryKind.EXPENSE, 2),
+            )
+        )
+
+        assertEquals(listOf("Bills", "gym", "Rent"), out.map { it.name })
+    }
+
+    @Test fun thepickerOffersItsChipsAlphabetically() {
+        val names = Categories.visibleFor(Categories.PRESETS, EntryType.DEBIT).map { it.name }
+
+        assertEquals(names.sortedBy { it.lowercase() }, names)
+    }
+
+    @Test fun thefilterOffersItsChipsAlphabetically() {
+        Direction.values().forEach { direction ->
+            val names = TransactionFilters.selectableCategories(Categories.PRESETS, direction)
+                .map { it.name }
+
+            assertEquals(direction.name, names.sortedBy { it.lowercase() }, names)
+        }
+    }
+
     @Test fun presetIdsAreUnique() {
         val ids = Categories.PRESETS.map { it.id }
         assertEquals(ids.size, ids.toSet().size)
@@ -55,9 +98,14 @@ class CategoriesTest {
     @Test fun firstFreeColourRunsOutRatherThanWrapping() {
         // Twenty colours, so the twenty-first category has none. Null is the honest answer and the
         // UI says so, instead of silently handing out a duplicate.
+        // Each one needs its own name, because a duplicate is refused and this loop would then
+        // never grow the list and never terminate.
         var cats = Categories.PRESETS
+        var n = 0
         while (Categories.firstFreeColour(cats) != null) {
-            cats = Categories.add(cats, "x", CategoryKind.EXPENSE, Categories.firstFreeColour(cats)!!)
+            cats = Categories.add(
+                cats, "x${n++}", CategoryKind.EXPENSE, Categories.firstFreeColour(cats)!!,
+            )
         }
         assertEquals(ChartPalette.RAMP.size, Categories.takenColours(cats).size)
         assertNull(Categories.firstFreeColour(cats))

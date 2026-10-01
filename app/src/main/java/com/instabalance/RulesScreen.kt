@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -145,7 +146,17 @@ internal fun RulesScreen(onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(rule.pattern, fontWeight = FontWeight.Medium)
+                            // The label leads where there is one, because that is the name you
+                            // gave it, with the pattern still underneath: what it matches on is
+                            // the thing you came here to check.
+                            rule.label?.let {
+                                Text(it, fontWeight = FontWeight.Medium)
+                                Text(
+                                    rule.pattern,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } ?: Text(rule.pattern, fontWeight = FontWeight.Medium)
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 CategoryDot(category)
                                 Spacer(Modifier.size(6.dp))
@@ -215,12 +226,16 @@ internal fun RulesScreen(onBack: () -> Unit) {
 private fun RuleEditSheet(rule: MerchantRule?, data: LedgerData, onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var pattern by remember(rule?.id) { mutableStateOf(rule?.pattern ?: "") }
+    var label by remember(rule?.id) { mutableStateOf(rule?.label.orEmpty()) }
     var categoryId by remember(rule?.id) { mutableStateOf(rule?.categoryId) }
     var alsoApply by remember(rule?.id) { mutableStateOf(false) }
+    var creatingCategory by remember(rule?.id) { mutableStateOf(false) }
+    var newName by remember(rule?.id) { mutableStateOf("") }
+    var newKind by remember(rule?.id) { mutableStateOf(CategoryKind.EXPENSE) }
 
     val normalised = MerchantRules.normalise(pattern)
     // Every category, not just one direction: a refund from a shop you usually spend at is income.
-    val options = data.categories.filterNot { it.hidden }
+    val options = Categories.byName(data.categories.filterNot { it.hidden })
 
     // What saying yes to "also apply" would actually do, counted before the user commits to it.
     val wouldMatch = remember(normalised, categoryId, data.entries) {
@@ -268,13 +283,27 @@ private fun RuleEditSheet(rule: MerchantRule?, data: LedgerData, onDismiss: () -
                 modifier = Modifier.fillMaxWidth(),
             )
 
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = label,
+                onValueChange = { label = it },
+                label = { Text("Show it as (optional)") },
+                supportingText = {
+                    Text(
+                        "Only changes what you see. Searching still looks at what the message said."
+                    )
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
             Spacer(Modifier.height(16.dp))
             Text("File it under", style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(6.dp))
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 options.forEach { c ->
                     FilterChip(
@@ -284,6 +313,59 @@ private fun RuleEditSheet(rule: MerchantRule?, data: LedgerData, onDismiss: () -
                         label = { Text(c.name) },
                     )
                 }
+                FilterChip(
+                    selected = false,
+                    onClick = { creatingCategory = !creatingCategory },
+                    label = { Text(if (creatingCategory) "Cancel" else "New category") },
+                )
+            }
+
+            if (creatingCategory) {
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                // Asked rather than assumed. Unlike the picker, which knows whether it is filing a
+                // credit or a debit, a rule has no transaction in front of it to infer from, and a
+                // category on the wrong side never appears where you go looking for it.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(CategoryKind.EXPENSE, CategoryKind.INCOME, CategoryKind.BOTH)
+                        .forEach { k ->
+                            FilterChip(
+                                selected = newKind == k,
+                                onClick = { newKind = k },
+                                label = {
+                                    Text(
+                                        when (k) {
+                                            CategoryKind.EXPENSE -> "Expense"
+                                            CategoryKind.INCOME -> "Income"
+                                            CategoryKind.BOTH -> "Both"
+                                        }
+                                    )
+                                },
+                            )
+                        }
+                }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    enabled = newName.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        // First unused colour, so a category made here does not come out looking
+                        // identical to one that already exists.
+                        categoryId = LedgerRepository.addCategory(
+                            newName, newKind,
+                            Categories.firstFreeColour(data.categories) ?: 0,
+                        )
+                        newName = ""
+                        creatingCategory = false
+                    },
+                ) { Text("Add and select") }
             }
 
             if (alreadyFiled > 0) {
@@ -330,15 +412,18 @@ private fun RuleEditSheet(rule: MerchantRule?, data: LedgerData, onDismiss: () -
                     enabled = normalised.isNotEmpty() && categoryId != null,
                     onClick = {
                         val id = categoryId ?: return@TextButton
+                        val shown = label.trim().takeIf { it.isNotEmpty() }
                         if (rule == null) {
-                            LedgerRepository.addRule(normalised, id, System.currentTimeMillis())
+                            LedgerRepository.addRule(
+                                normalised, id, System.currentTimeMillis(), shown,
+                            )
                         } else {
                             // Move the entries this rule filed BEFORE changing it, while they can
                             // still be identified by the category the old rule put them in.
                             if (alreadyFiled > 0 && moveExisting) {
                                 LedgerRepository.recategoriseRuleOwned(rule, id)
                             }
-                            LedgerRepository.updateRule(rule.id, normalised, id)
+                            LedgerRepository.updateRule(rule.id, normalised, id, shown)
                         }
                         if (alsoApply) {
                             LedgerRepository.applyRuleToUncategorised(

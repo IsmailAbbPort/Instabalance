@@ -6,9 +6,17 @@ import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 class MainActivity : FragmentActivity() {
@@ -27,11 +35,16 @@ class MainActivity : FragmentActivity() {
             )
         }
         LedgerRepository.init(applicationContext)
+        SessionResume.init(applicationContext)
 
-        // Debug-only hook so sample data can be loaded without tapping through Settings:
+        // Emulator-only hook so sample data can be loaded without tapping through Settings:
         //   adb shell am start -n com.instabalance/.MainActivity --ez seed_sample_data true
         // Handy for screenshots, and for a device whose input service is being unreliable.
-        if (BuildConfig.DEBUG && intent?.getBooleanExtra("seed_sample_data", false) == true) {
+        //
+        // Gated the same way as the Settings buttons rather than on BuildConfig.DEBUG, because it
+        // destroys the ledger and the phone runs the debug APK: anyone with USB debugging could
+        // wipe a real ledger with one adb command.
+        if (isDevSandbox && intent?.getBooleanExtra("seed_sample_data", false) == true) {
             LedgerRepository.loadSampleData()
         }
 
@@ -60,8 +73,33 @@ private fun Gate() {
     val unlocked by LedgerRepository.sessionUnlocked.collectAsStateWithLifecycle()
     val activity = LocalContext.current as? FragmentActivity
 
-    if (!data.hasPasscode || unlocked) {
-        val nav = rememberNavStack()
+    // Above the lock, deliberately. Leaving the app re-locks it, which swaps this whole branch for
+    // the passcode screen and takes everything remembered inside it along: the back stack and the
+    // transaction filter both died there, so every unlock landed on an unfiltered Home no matter
+    // what you had been reading a moment earlier.
+    val showContent = !data.hasPasscode || unlocked
+    val resumed = remember { SessionResume.load(System.currentTimeMillis()) }
+    val nav = rememberNavStack(
+        initial = resumed?.routes ?: listOf(Route.HOME),
+        backEnabled = showContent,
+    )
+    var filter by remember { mutableStateOf(resumed?.filter ?: TransactionFilter()) }
+
+    // Written when the app leaves the screen, which is the only moment the answer can change and
+    // the only one worth a write. Read back on the next launch, and honoured for fifteen minutes.
+    val latestFilter by rememberUpdatedState(filter)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                SessionResume.save(nav.snapshot(), latestFilter, System.currentTimeMillis())
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    if (showContent) {
         when (nav.current) {
             Route.HOME -> HomeScreen(
                 onSettings = { nav.go(Route.SETTINGS) },
@@ -69,7 +107,11 @@ private fun Gate() {
                 onAllTransactions = { nav.go(Route.TRANSACTIONS) },
             )
             Route.INBOX -> InboxScreen(onBack = { nav.back() })
-            Route.TRANSACTIONS -> TransactionsScreen(onBack = { nav.back() })
+            Route.TRANSACTIONS -> TransactionsScreen(
+                filter = filter,
+                onFilterChange = { filter = it },
+                onBack = { nav.back() },
+            )
             Route.SETTINGS -> SettingsScreen(
                 onBack = { nav.back() },
                 onCategories = { nav.go(Route.CATEGORIES) },
