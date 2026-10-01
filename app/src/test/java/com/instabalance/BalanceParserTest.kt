@@ -69,7 +69,7 @@ class BalanceParserTest {
 
     @Test fun instapayReceivedNotification_isCredit() {
         assertTxn(
-            "InstaPay 22/07/2026 You have received 100.00 EGP from naniiceeabbas@instapay",
+            "InstaPay 22/07/2026 You have received 100.00 EGP from client.invoice@instapay",
             EntryType.CREDIT, 10000
         )
     }
@@ -121,8 +121,8 @@ class BalanceParserTest {
 
     @Test fun instapayNotification_extractsTheAddress() {
         assertEquals(
-            "naniiceeabbas@instapay",
-            parse("InstaPay 22/07/2026 You have received 100.00 EGP from naniiceeabbas@instapay")?.merchant
+            "client.invoice@instapay",
+            parse("InstaPay 22/07/2026 You have received 100.00 EGP from client.invoice@instapay")?.merchant
         )
     }
 

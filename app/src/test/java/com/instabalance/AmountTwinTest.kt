@@ -95,7 +95,7 @@ class AmountTwinTest {
 
     @Test fun anentryThatAlreadyHasAnameIsLeftToItsRules() {
         val past = entry(categoryId = "rent")
-        val now = entry(merchant = "laylaaosman@instapay")
+        val now = entry(merchant = "family.transfer@instapay")
 
         assertEquals(emptyList<String>(), amountTwinCategoryIds(listOf(past, now), now))
     }

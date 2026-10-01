@@ -19,7 +19,7 @@ class BackupCryptoTest {
             Entry(id = "a", type = EntryType.DEBIT, amountMinor = 52_500, timestamp = 1_700_000_000_000L,
                 merchant = "DR BOSHRA PHARMACY CAIRO"),
             Entry(id = "b", type = EntryType.CREDIT, amountMinor = 55_000, timestamp = 1_700_000_100_000L,
-                merchant = "laylahosnyy@instapay"),
+                merchant = "family.transfer@instapay"),
         ),
     )
 
@@ -113,7 +113,7 @@ class BackupCryptoTest {
         val sealed = BackupCrypto.encrypt(exported(), secret)
 
         assertFalse(sealed.contains("DR BOSHRA"))
-        assertFalse(sealed.contains("laylahosnyy"))
+        assertFalse(sealed.contains("family.transfer"))
         assertFalse(sealed.contains("52500"))
     }
 

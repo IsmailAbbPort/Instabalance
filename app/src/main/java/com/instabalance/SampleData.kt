@@ -39,10 +39,14 @@ object SampleData {
         Spend(null, null, 20_000, 150_000, 7),
     )
 
+    // Shop names are real chains, because the parser's merchant extraction is only worth
+    // demonstrating against the shapes a bank actually prints. Handles are not: these two are
+    // deliberately generic, since sample data ends up in screenshots in a public repository and a
+    // plausible-looking handle there is somebody's real address to anyone who recognises it.
     private val INCOME = listOf(
         Spend("MONTHLY SALARY TRANSFER", "salary", 1_800_000, 1_800_000, 1),
-        Spend("naniiceeabbas@instapay", "freelance", 150_000, 600_000, 2),
-        Spend("laylaaosman@instapay", "family", 20_000, 80_000, 3),
+        Spend("client.invoice@instapay", "freelance", 150_000, 600_000, 2),
+        Spend("family.transfer@instapay", "family", 20_000, 80_000, 3),
     )
 
     /**
