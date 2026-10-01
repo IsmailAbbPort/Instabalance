@@ -127,6 +127,17 @@ object Budget {
     ): Map<String, Int> = if (storedMonth == month) stored else emptyMap()
 
     /**
+     * The monthly ladder's equivalent, and needed for the same reason.
+     *
+     * Both budgets read the one [LedgerData.budgetMonth] stamp, and either evaluation may be the
+     * first write of a new month. Filing a transaction runs only the category pass, so without this
+     * that pass would move the month stamp while leaving last month's high-water mark standing, and
+     * every monthly milestone at or below it would be swallowed for the rest of the month.
+     */
+    fun carryOverMilestone(storedMonth: String, month: String, fired: Int): Int =
+        if (storedMonth == month) fired else 0
+
+    /**
      * Every category that has set itself a limit, worst first, so the one you are about to blow is
      * the one you see. Categories with no limit are absent rather than shown at zero.
      */

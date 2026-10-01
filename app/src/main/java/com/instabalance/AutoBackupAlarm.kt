@@ -3,6 +3,7 @@ package com.instabalance
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -151,35 +152,45 @@ object AutoBackupAlarm {
         }
     }
 
-    /** Names of our own backups in the folder, newest last. Empty when the folder is not there yet. */
-    fun existing(context: Context): List<String> = runCatching {
+    /**
+     * Our own backups in the folder, newest last, each with the MediaStore row id that identifies
+     * it exactly.
+     *
+     * Matched on the folder itself rather than on a name containing it, and deleted later by id
+     * rather than by name. Deleting by display name alone searches the whole Downloads collection,
+     * which is a wide net for a setting whose promise is that it only removes what it wrote.
+     */
+    fun existing(context: Context): List<Pair<Long, String>> = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val names = mutableListOf<String>()
+            val rows = mutableListOf<Pair<Long, String>>()
             context.contentResolver.query(
                 MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                arrayOf(MediaStore.Downloads.DISPLAY_NAME),
-                "${MediaStore.Downloads.RELATIVE_PATH} LIKE ?",
-                arrayOf("%${AutoBackup.FOLDER}%"),
+                arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME),
+                "${MediaStore.Downloads.RELATIVE_PATH} = ?",
+                // MediaStore stores the path with its trailing slash.
+                arrayOf("${relativePath()}/"),
                 null,
             )?.use { c ->
-                while (c.moveToNext()) names += c.getString(0)
+                while (c.moveToNext()) rows += c.getLong(0) to c.getString(1)
             }
-            AutoBackup.ours(names)
+            val keep = AutoBackup.ours(rows.map { it.second }).toSet()
+            rows.filter { it.second in keep }.sortedBy { it.second }
         } else {
-            AutoBackup.ours(legacyFolder().list()?.toList() ?: emptyList())
+            AutoBackup.ours(legacyFolder().list()?.toList() ?: emptyList()).map { 0L to it }
         }
     }.getOrDefault(emptyList())
 
     private fun prune(context: Context, keep: Int) {
-        val doomed = AutoBackup.toDelete(existing(context), keep)
+        val rows = existing(context)
+        val doomed = AutoBackup.toDelete(rows.map { it.second }, keep).toSet()
         if (doomed.isEmpty()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            doomed.forEach { name ->
+            rows.filter { it.second in doomed }.forEach { (id, _) ->
                 runCatching {
                     context.contentResolver.delete(
-                        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                        "${MediaStore.Downloads.DISPLAY_NAME} = ?",
-                        arrayOf(name),
+                        ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id),
+                        null,
+                        null,
                     )
                 }
             }
@@ -192,12 +203,25 @@ object AutoBackupAlarm {
 /** Fires the scheduled backup, and re-arms after a reboot. */
 class AutoBackupReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        val boot = intent.action == Intent.ACTION_BOOT_COMPLETED
+        if (!boot && intent.action != AutoBackupAlarm.ACTION) return
+
         val app = context.applicationContext
         LedgerRepository.init(app)
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
+        if (boot) {
             AutoBackupAlarm.sync(app, LedgerRepository.data.value)
-        } else {
-            AutoBackupAlarm.runIfDue(app)
+            return
         }
+        // onReceive is the main thread, and a run is 210k rounds of PBKDF2 plus encrypting the
+        // whole ledger plus a MediaStore write. goAsync keeps the process alive while that happens
+        // off it, rather than risking an ANR in a receiver.
+        val finish = goAsync()
+        Thread {
+            try {
+                AutoBackupAlarm.runIfDue(app)
+            } finally {
+                finish.finish()
+            }
+        }.start()
     }
 }

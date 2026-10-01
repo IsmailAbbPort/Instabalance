@@ -99,11 +99,16 @@ object ReminderAlarm {
  */
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // Matched positively. "Anything that is not BOOT_COMPLETED" treats an unrecognised action
+        // as a reason to do the work, which is the wrong way round for a receiver.
+        val boot = intent.action == Intent.ACTION_BOOT_COMPLETED
+        if (!boot && intent.action != ReminderAlarm.ACTION) return
+
         val app = context.applicationContext
         LedgerRepository.init(app)
         val data = LedgerRepository.data.value
 
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) {
+        if (!boot) {
             val pending = Insights.uncategorisedCount(data.entries)
             if (Reminders.shouldPost(pending, data.pendingReminderEnabled)) {
                 ReminderAlarm.post(app, pending)

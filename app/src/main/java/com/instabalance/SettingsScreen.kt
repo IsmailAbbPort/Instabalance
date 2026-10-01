@@ -46,6 +46,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -62,6 +63,8 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -561,8 +564,9 @@ private fun BackupSection(data: LedgerData) {
             ) { Text("Restore from a backup") }
 
             Text(
-                "The export holds your transactions, categories, rules and budget. It does not " +
-                    "hold your passcode or any captured message text.",
+                "The export holds your transactions, categories, rules and budget, and the full " +
+                    "text of every bank message they came from. It is not encrypted, so keep it " +
+                    "somewhere you would keep a bank statement. It does not hold your passcode.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -681,6 +685,7 @@ private fun BackupSection(data: LedgerData) {
 @Composable
 private fun AutoBackupSection(data: LedgerData) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var settingPassphrase by remember { mutableStateOf(false) }
     val hasPassphrase = remember(settingPassphrase) { BackupPassphrase.isSet() }
 
@@ -755,7 +760,9 @@ private fun AutoBackupSection(data: LedgerData) {
                 )
 
                 OutlinedButton(
-                    onClick = { AutoBackupAlarm.runIfDue(context, force = true) },
+                    // Off the UI thread: forcing a run always does the key derivation, which
+                    // froze the screen for the length of it.
+                    onClick = { scope.launch(Dispatchers.IO) { AutoBackupAlarm.runIfDue(context, force = true) } },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Back up now") }
 

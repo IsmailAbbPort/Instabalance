@@ -148,27 +148,31 @@ internal fun CategoryPickerSheet(
                 Spacer(Modifier.height(12.dp))
                 // Stacked, not side by side: sharing the row with the button left the name field
                 // about half a phone wide, which is not enough to read what you are typing.
+                val clash = Categories.nameTaken(data.categories, newName)
                 OutlinedTextField(
                     value = newName,
                     onValueChange = { newName = it },
                     label = { Text("Name") },
                     singleLine = true,
+                    isError = clash,
+                    supportingText = if (clash) {
+                        { Text(duplicateNameMessage(data.categories, newName)) }
+                    } else null,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
                 Button(
-                    enabled = newName.isNotBlank(),
+                    enabled = newName.isNotBlank() && !clash,
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
                         val kind = if (entry.type == EntryType.CREDIT) CategoryKind.INCOME
                         else CategoryKind.EXPENSE
                         // First unused colour, so a category made mid-triage does not come out
                         // looking identical to one that already exists.
-                        val id = LedgerRepository.addCategory(
+                        LedgerRepository.addCategory(
                             newName, kind,
                             Categories.firstFreeColour(data.categories) ?: 0,
-                        )
-                        pick(id)
+                        )?.let { pick(it) }
                     },
                 ) { Text("Add") }
             }

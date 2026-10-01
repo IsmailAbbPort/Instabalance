@@ -78,13 +78,15 @@
             android:exported="false" />
 
         <!--
-          The evening reminder's alarm, and the reboot re-arm. Exported so the system can deliver
-          BOOT_COMPLETED; the alarm itself arrives on an explicit PendingIntent, and the receiver
-          reads the ledger and posts a notification rather than changing anything.
+          The evening reminder's alarm, and the reboot re-arm. NOT exported: BOOT_COMPLETED comes
+          from the system, which is exempt from the export check, and the alarm arrives on this
+          app's own explicit PendingIntent. Exporting it let any app on the phone broadcast to it
+          and force the ledger open to post a notification stating how many transactions are
+          waiting, which is a free read on when you spend.
         -->
         <receiver
             android:name=".ReminderReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
@@ -93,7 +95,7 @@
         <!-- The scheduled encrypted backup, and its reboot re-arm. -->
         <receiver
             android:name=".AutoBackupReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>

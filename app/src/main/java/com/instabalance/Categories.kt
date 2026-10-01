@@ -117,7 +117,12 @@ object Categories {
      */
     fun ensurePresets(categories: List<Category>): List<Category> {
         val known = categories.mapTo(mutableSetOf()) { it.id }
-        val missing = PRESETS.filterNot { it.id in known }
+        // Also skipped when the user already has a category of that name. A preset added in a later
+        // build must not walk into a name somebody chose first, or it creates exactly the duplicate
+        // the uniqueness rule exists to prevent, and neither can then be renamed out of the way.
+        val missing = PRESETS
+            .filterNot { it.id in known }
+            .filterNot { nameTaken(categories, it.name) }
         return if (missing.isEmpty()) categories else categories + missing
     }
 

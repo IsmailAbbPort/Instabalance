@@ -19,9 +19,17 @@ class App : Application() {
         // Catches up a backup the phone was off for, then arms the next one. Checked on every
         // launch as well as on the alarm, so a dropped alarm costs a late backup and not a missing
         // one.
+        //
+        // Off the main thread: a run is 210k rounds of PBKDF2 plus encrypting the whole ledger,
+        // and this is onCreate, so doing it here stalled the cold start by that much. Wrapped
+        // because nothing about scheduling a backup is worth failing to start the app over.
         BackupPassphrase.init(this)
-        AutoBackupAlarm.runIfDue(this)
-        AutoBackupAlarm.sync(this, LedgerRepository.data.value)
+        Thread {
+            runCatching {
+                AutoBackupAlarm.runIfDue(this)
+                AutoBackupAlarm.sync(this, LedgerRepository.data.value)
+            }
+        }.start()
         // Wired here so the ledger itself never imports NotificationManager and stays testable.
         LedgerRepository.onBudgetMilestone = { milestone, spent, limit ->
             BudgetAlerts.post(this, milestone, spent, limit)

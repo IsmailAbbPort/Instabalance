@@ -150,14 +150,20 @@ data class ParsedTxn(
  * Keystore. ANCHOR entries and unknown ids are silently left alone: an anchor is a re-sync, not
  * spending, so it must never carry a category.
  */
-fun applyCategory(entries: List<Entry>, ids: Set<String>, categoryId: String?): List<Entry> =
-    entries.map { e ->
+fun applyCategory(entries: List<Entry>, ids: Set<String>, categoryId: String?): List<Entry> {
+    // A blank id is not a category. It reads as filed everywhere (the inbox and the triage check
+    // both test for null), so an entry carrying one leaves the review list while still showing as
+    // "Uncategorised" and can never be found again. Normalised here rather than at each caller so
+    // no future caller can reintroduce it.
+    val id = categoryId?.takeIf { it.isNotBlank() }
+    return entries.map { e ->
         if (e.id in ids && e.type != EntryType.ANCHOR) {
-            e.copy(categoryId = categoryId, categoryFromRule = false)
+            e.copy(categoryId = id, categoryFromRule = false)
         } else {
             e
         }
     }
+}
 
 /**
  * Pure note assignment, kept beside [applyCategory] and out of the repository for the same reason:
@@ -330,6 +336,14 @@ object LedgerRepository {
         synchronized(lock) {
             if (::file.isInitialized) return
             file = File(context.applicationContext.filesDir, "ledger.enc")
+            // A file that exists but will not decrypt must never be mistaken for a first launch.
+            // The else branch below persists an empty ledger immediately, which would overwrite the
+            // only copy of everything the user has ever recorded, silently and unrecoverably. Copy
+            // it aside first, exactly as the unreadable-JSON path does.
+            if (SecureStore.existsButUnreadable(file)) {
+                runCatching { file.copyTo(File(file.parentFile, "ledger.enc.bak"), overwrite = true) }
+                return
+            }
             val decrypted = SecureStore.readString(file)
             if (decrypted != null) {
                 runCatching { json.decodeFromString<LedgerData>(decrypted) }
@@ -650,6 +664,10 @@ object LedgerRepository {
 
         val next = d.copy(
             budgetMonth = month,
+            // This pass can be the first write of a new month (filing from the inbox on the 1st
+            // before any SMS lands), and stamping the month without clearing the monthly ladder
+            // would make the stale high-water mark look like this month's.
+            highestMilestoneFired = Budget.carryOverMilestone(d.budgetMonth, month, d.highestMilestoneFired),
             categoryMilestones = fired + toFire.associate {
                 it.category.id to Budget.categoryReached(it.spentMinor, it.limitMinor)
             },
@@ -708,9 +726,15 @@ object LedgerRepository {
         persist(next)
     }
 
-    /** Empty when the name was blank or already taken, which [Categories.add] refuses. */
-    fun addCategory(name: String, kind: CategoryKind, colorIndex: Int): String {
-        var newId = ""
+    /**
+     * Null when the name was blank or already taken, which [Categories.add] refuses.
+     *
+     * Nullable rather than an empty string so a caller cannot treat a refusal as an id: filing an
+     * entry under "" hides it from the review inbox forever, and the picker also writes a merchant
+     * rule pointing at the same nothing, which then swallows every later transaction from that shop.
+     */
+    fun addCategory(name: String, kind: CategoryKind, colorIndex: Int): String? {
+        var newId: String? = null
         synchronized(lock) {
             val categories = Categories.add(_data.value.categories, name, kind, colorIndex)
             if (categories.size == _data.value.categories.size) return@synchronized

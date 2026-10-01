@@ -50,14 +50,22 @@ object AutoBackup {
         if (frequency == BackupFrequency.OFF) return null
         // Never run: owed immediately, so turning it on gives you a backup now rather than in a month.
         if (lastRunAt <= 0L) return 0L
-        val last = Instant.ofEpochMilli(lastRunAt).atZone(zone)
-        val next = when (frequency) {
-            BackupFrequency.DAILY -> last.plusDays(1)
-            BackupFrequency.WEEKLY -> last.plusWeeks(1)
-            BackupFrequency.MONTHLY -> last.plusMonths(1)
-            BackupFrequency.OFF -> return null
+        // Total, deliberately. This runs from Application.onCreate, and a stored timestamp near
+        // Long.MAX_VALUE makes the arithmetic below overflow: an exception here does not fail a
+        // backup, it stops the app starting at all, for good, because the value is already on disk.
+        return runCatching {
+            val last = Instant.ofEpochMilli(lastRunAt).atZone(zone)
+            when (frequency) {
+                BackupFrequency.DAILY -> last.plusDays(1)
+                BackupFrequency.WEEKLY -> last.plusWeeks(1)
+                BackupFrequency.MONTHLY -> last.plusMonths(1)
+                BackupFrequency.OFF -> return null
+            }.toInstant().toEpochMilli()
+        }.getOrElse {
+            // A timestamp we cannot do arithmetic on is not a schedule. Treat it as owed now, which
+            // writes a backup and replaces the nonsense with a real time.
+            0L
         }
-        return next.toInstant().toEpochMilli()
     }
 
     /**
@@ -91,8 +99,19 @@ object AutoBackup {
      * week you did not spend anything, and the retention window then throws away the week you did.
      */
     fun fingerprint(d: LedgerData): String {
-        val entries = d.entries.sortedBy { it.id }
-            .joinToString("|") { "${it.id}:${it.type}:${it.amountMinor}:${it.categoryId}:${it.note}" }
-        return (entries.hashCode().toLong() and 0xFFFFFFFFL).toString(16) + "-" + d.entries.size
+        // Fingerprint what the FILE would contain, not a hand-picked subset of it. Listing fields
+        // by hand missed categories, rules, limits and the SMS config, so a week spent curating
+        // rules with no new transactions looked like "nothing changed" and produced no backup,
+        // which is precisely the hand-made state a backup exists to protect.
+        //
+        // The three fields excluded below are written by the backup run itself, so leaving them in
+        // would make every ledger differ from its own last fingerprint and defeat the check.
+        val content = Backup.forExport(d).copy(
+            entries = d.entries.sortedBy { it.id },
+            autoBackupLastRunAt = 0L,
+            autoBackupLastFingerprint = "",
+            autoBackupLastResult = "",
+        )
+        return (content.hashCode().toLong() and 0xFFFFFFFFL).toString(16) + "-" + d.entries.size
     }
 }

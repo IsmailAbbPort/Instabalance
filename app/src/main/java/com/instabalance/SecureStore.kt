@@ -57,6 +57,16 @@ object SecureStore {
         }
     }
 
+    /**
+     * True when the file is there but will not decrypt: tampered, truncated, or written under a
+     * Keystore key that no longer exists.
+     *
+     * Callers need this because [readString] answers null to both "nothing here yet" and "I cannot
+     * read what is here", and those demand opposite responses. Treating the second as the first
+     * means writing a fresh empty file straight over the only copy of the data.
+     */
+    fun existsButUnreadable(file: File): Boolean = file.exists() && readString(file) == null
+
     /** Returns the decrypted text, or null if the file is missing / unreadable / tampered. */
     fun readString(file: File): String? {
         if (!file.exists()) return null

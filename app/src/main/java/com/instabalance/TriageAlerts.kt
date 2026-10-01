@@ -73,6 +73,18 @@ object TriageAlerts {
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            // The title is the amount and the body is who it was from. The default lockscreen
+            // setting renders PRIVATE notifications in full, which would put both on a locked
+            // screen, in an app that sets FLAG_SECURE so the same figures cannot be screenshotted.
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(
+                NotificationCompat.Builder(context, CHANNEL_ID)
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle("A transaction needs a category")
+                    .setContentIntent(open)
+                    .setAutoCancel(true)
+                    .build()
+            )
 
         choices.forEach { category ->
             val intent = Intent(context, TriageActionReceiver::class.java).apply {
@@ -90,7 +102,13 @@ object TriageAlerts {
                 intent,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
-            builder.addAction(0, category.name, pending)
+            // Behind the lock when there is one. Without this, anyone holding the locked phone can
+            // file a transaction from the shade, and a filing that crosses a category limit posts a
+            // second notification disclosing that category's spend to the same locked screen.
+            val action = NotificationCompat.Action.Builder(0, category.name, pending)
+                .setAuthenticationRequired(data.hasPasscode)
+                .build()
+            builder.addAction(action)
         }
 
         runCatching { manager.notify(notificationId(entry.id), builder.build()) }

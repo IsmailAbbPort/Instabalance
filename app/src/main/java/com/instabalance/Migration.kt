@@ -120,11 +120,17 @@ object Migration {
      */
     private fun renameOtherPresets(categories: List<Category>): List<Category> =
         categories.map {
-            when {
-                it.id == Categories.OTHER_EXPENSE && it.name == "Other" -> it.copy(name = "Other expense")
-                it.id == Categories.OTHER_INCOME && it.name == "Other" -> it.copy(name = "Other income")
-                else -> it
+            val wanted = when (it.id) {
+                Categories.OTHER_EXPENSE -> "Other expense"
+                Categories.OTHER_INCOME -> "Other income"
+                else -> return@map it
             }
+            // Skip when the user got there first and already has a category of that name. Creating
+            // the clash would leave two identical chips in every picker, and the preset's own edit
+            // sheet has no name field to resolve it with, so its Done button would be dead.
+            // Leaving it as "Other" is still unique against "Other expense".
+            if (it.name != "Other" || Categories.nameTaken(categories, wanted, excludingId = it.id)) it
+            else it.copy(name = wanted)
         }
 
     /**

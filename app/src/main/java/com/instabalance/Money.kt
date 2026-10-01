@@ -15,8 +15,14 @@ object Money {
         val cleaned = raw.replace(",", "").trim()
         if (cleaned.isEmpty()) return null
         return try {
-            BigDecimal(cleaned).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
+            // longValueExact, not toLong: toLong narrows silently, so a number too big for a Long
+            // comes back as some unrelated small figure rather than as a refusal. A bank message
+            // reading 184,467,440,737,095,526.16 was being recorded as 10.00 EGP, and the same
+            // function reads the balance the automatic re-sync pins the ledger to.
+            BigDecimal(cleaned).movePointRight(2).setScale(0, RoundingMode.HALF_UP).longValueExact()
         } catch (e: NumberFormatException) {
+            null
+        } catch (e: ArithmeticException) {
             null
         }
     }

@@ -46,15 +46,21 @@ object BudgetAlerts {
      * going over in the same week do not overwrite each other, and so neither overwrites the
      * monthly budget's alert.
      */
+    /**
+     * Tagged by category id rather than given an id derived from its hash. A hash is not unique:
+     * the id "e" hashes to exactly 4401, which is the evening reminder's own notification id, so
+     * one alert could silently replace another. A tag makes it exact.
+     */
     fun postCategory(context: Context, status: CategoryBudgetStatus) =
         post(
             context,
-            CATEGORY_NOTIFICATION_BASE + status.category.id.hashCode(),
+            CATEGORY_NOTIFICATION_BASE,
             Budget.categoryTitle(status.category),
             Budget.categoryBody(status),
+            tag = "category:${status.category.id}",
         )
 
-    private fun post(context: Context, id: Int, title: String, body: String) {
+    private fun post(context: Context, id: Int, title: String, body: String, tag: String? = null) {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return
 
@@ -73,10 +79,23 @@ object BudgetAlerts {
             .setContentIntent(open)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            // The body carries what you have spent against your limit, and the default lockscreen
+            // setting shows PRIVATE notifications in full. That would put a figure on a locked
+            // screen in an app whose release build sets FLAG_SECURE precisely so the balance cannot
+            // be seen without unlocking. The public version says only that something happened.
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(
+                NotificationCompat.Builder(context, CHANNEL_ID)
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle("Budget update")
+                    .setContentIntent(open)
+                    .setAutoCancel(true)
+                    .build()
+            )
             .build()
 
         // Throws only if the runtime permission is missing, which areNotificationsEnabled already
         // covers; catching keeps a failed alert from ever reaching a background receiver.
-        runCatching { manager.notify(id, notification) }
+        runCatching { manager.notify(tag, id, notification) }
     }
 }

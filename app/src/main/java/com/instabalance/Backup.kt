@@ -84,6 +84,22 @@ object Backup {
         biometricEnabled = current.biometricEnabled,
         learningMode = current.learningMode,
         captures = current.captures,
+        // Everything below describes THIS phone rather than the backup's contents, and a file is
+        // not allowed to set any of it.
+        //
+        // Which apps and which SMS senders get read is the device's own policy: an empty sender
+        // list means "read every sender", so a file could otherwise turn the app into a recorder
+        // of every message on the phone, and a file-supplied smsDefaultsVersion would suppress the
+        // migration that repairs it. The backup schedule is likewise this phone's, and an
+        // arbitrary lastRunAt is arithmetic this app has to survive at startup.
+        watchedPackages = current.watchedPackages,
+        smsConfig = current.smsConfig,
+        smsDefaultsVersion = current.smsDefaultsVersion,
+        autoBackupFrequency = current.autoBackupFrequency,
+        autoBackupKeep = current.autoBackupKeep,
+        autoBackupLastRunAt = current.autoBackupLastRunAt,
+        autoBackupLastFingerprint = current.autoBackupLastFingerprint,
+        autoBackupLastResult = current.autoBackupLastResult,
     )
 
     fun encode(d: LedgerData, now: Long, appVersion: String): String =

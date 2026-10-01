@@ -352,18 +352,29 @@ private fun RuleEditSheet(rule: MerchantRule?, data: LedgerData, onDismiss: () -
                         }
                 }
                 Spacer(Modifier.height(8.dp))
+                val clash = Categories.nameTaken(data.categories, newName)
+                if (clash) {
+                    Text(
+                        duplicateNameMessage(data.categories, newName),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 Button(
-                    enabled = newName.isNotBlank(),
+                    enabled = newName.isNotBlank() && !clash,
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
                         // First unused colour, so a category made here does not come out looking
-                        // identical to one that already exists.
-                        categoryId = LedgerRepository.addCategory(
+                        // identical to one that already exists. A refusal leaves the selection
+                        // alone rather than pointing the rule at nothing.
+                        LedgerRepository.addCategory(
                             newName, newKind,
                             Categories.firstFreeColour(data.categories) ?: 0,
-                        )
-                        newName = ""
-                        creatingCategory = false
+                        )?.let {
+                            categoryId = it
+                            newName = ""
+                            creatingCategory = false
+                        }
                     },
                 ) { Text("Add and select") }
             }
